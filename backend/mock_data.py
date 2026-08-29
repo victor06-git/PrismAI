@@ -1,10 +1,40 @@
 """
 Static fallback/demo data for PrismAI.
 
-Used when OpenAI / Fal.ai calls fail (rate limit, missing API key, network
-issues, etc.) so the live demo never shows a broken screen. Shapes match
-`schemas.ProcessMeetingResponse` and `schemas.GenerateAssetResponse` exactly.
+Used when OpenAI / Fal.ai / Cala calls fail (rate limit, missing API key,
+network issues, etc.) so the live demo never shows a broken screen. Shapes
+match `schemas.ProcessMeetingResponse`, `schemas.GenerateAssetResponse` and
+`schemas.DataInsightsResponse` exactly.
 """
+
+# Shared between MOCK_PROCESS_MEETING_RESPONSE and MOCK_DATA_INSIGHTS_RESPONSE
+# so the two endpoints stay consistent in a demo.
+_SAMPLE_DATA_INSIGHTS: list[dict] = [
+    {
+        "id": "INS-1",
+        "question": "Are new users completing onboarding?",
+        "metricTarget": "Onboarding Completion Rate",
+        "value": "61%",
+        "trend": "up",
+        "summary": "Completion rate climbed 8pts after simplifying the signup form last sprint.",
+    },
+    {
+        "id": "INS-2",
+        "question": "Where do users drop off during signup?",
+        "metricTarget": "Step 2 Drop-off Rate",
+        "value": "24%",
+        "trend": "down",
+        "summary": "Drop-off at the profile-details step decreased after removing optional fields.",
+    },
+    {
+        "id": "INS-3",
+        "question": "How fast do users reach activation?",
+        "metricTarget": "Time to First Value",
+        "value": "3m 40s",
+        "trend": "flat",
+        "summary": "Time to first value has held steady; next sprint should target the empty-state UX.",
+    },
+]
 
 MOCK_PROCESS_MEETING_RESPONSE: dict = {
     "summary": (
@@ -90,34 +120,13 @@ MOCK_PROCESS_MEETING_RESPONSE: dict = {
             ),
         },
     ],
-    "dataInsights": [
-        {
-            "id": "INS-1",
-            "question": "Are new users completing onboarding?",
-            "metricTarget": "Onboarding Completion Rate",
-            "value": "61%",
-            "trend": "up",
-            "summary": "Completion rate climbed 8pts after simplifying the signup form last sprint.",
-        },
-        {
-            "id": "INS-2",
-            "question": "Where do users drop off during signup?",
-            "metricTarget": "Step 2 Drop-off Rate",
-            "value": "24%",
-            "trend": "down",
-            "summary": "Drop-off at the profile-details step decreased after removing optional fields.",
-        },
-        {
-            "id": "INS-3",
-            "question": "How fast do users reach activation?",
-            "metricTarget": "Time to First Value",
-            "value": "3m 40s",
-            "trend": "flat",
-            "summary": "Time to first value has held steady; next sprint should target the empty-state UX.",
-        },
-    ],
+    "dataInsights": _SAMPLE_DATA_INSIGHTS,
 }
 
 MOCK_GENERATE_ASSET_RESPONSE: dict = {
     "imageUrl": "https://placehold.co/1280x720/6d28d9/ffffff?text=PrismAI+Fallback+Asset",
+}
+
+MOCK_DATA_INSIGHTS_RESPONSE: dict = {
+    "dataInsights": _SAMPLE_DATA_INSIGHTS,
 }

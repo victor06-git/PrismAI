@@ -89,3 +89,18 @@ class GenerateAssetRequest(BaseModel):
 
 class GenerateAssetResponse(BaseModel):
     imageUrl: str
+
+
+# ---------------------------------------------------------------------------
+# /api/data-insights
+# ---------------------------------------------------------------------------
+
+
+class DataInsightsRequest(BaseModel):
+    transcript: str = Field(
+        description="Meeting transcript / conversation context to enrich with Cala analytics."
+    )
+
+
+class DataInsightsResponse(BaseModel):
+    dataInsights: list[CalaDataInsight]
