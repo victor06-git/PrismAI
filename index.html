@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Board</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-board: #f4f5f7;
+      --bg-column: #ebecf0;
+      --bg-card: #ffffff;
+      --text-primary: #111827;
+      --text-secondary: #6b7280;
+      --text-muted: #9ca3af;
+      --border: #e5e7eb;
+      --accent: #111827;
+      --header-bg: rgba(0, 0, 0, 0.24);
+      --shadow-card: 0 1px 2px rgba(9, 30, 66, 0.15);
+      --radius: 12px;
+    }
+
+    body {
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-weight: 400;
+      color: var(--text-primary);
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 24px;
+      background: var(--header-bg);
+      backdrop-filter: blur(8px);
+    }
+
+    .header__logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .header__logo-icon {
+      width: 28px;
+      height: 28px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+    }
+
+    .header__divider {
+      width: 1px;
+      height: 24px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .header__title {
+      color: #fff;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    /* Board */
+    .board {
+      display: flex;
+      gap: 16px;
+      padding: 24px;
+      overflow-x: auto;
+      min-height: calc(100vh - 52px);
+      align-items: flex-start;
+    }
+
+    .board::-webkit-scrollbar {
+      height: 8px;
+    }
+
+    .board::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    /* Column */
+    .column {
+      flex: 0 0 300px;
+      background: var(--bg-column);
+      border-radius: var(--radius);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 100px);
+    }
+
+    .column__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 4px 12px;
+    }
+
+    .column__title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      letter-spacing: 0.01em;
+    }
+
+    .column__count {
+      font-size: 12px;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.06);
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .column__cards {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 40px;
+      padding: 2px;
+      border-radius: 8px;
+      transition: background 0.15s;
+    }
+
+    .column__cards.drag-over {
+      background: rgba(102, 126, 234, 0.12);
+    }
+
+    .column__cards::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .column__cards::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.15);
+      border-radius: 3px;
+    }
+
+    /* Card */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: var(--shadow-card);
+      cursor: grab;
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+
+    .card:hover {
+      box-shadow: 0 4px 12px rgba(9, 30, 66, 0.12);
+    }
+
+    .card:active {
+      cursor: grabbing;
+    }
+
+    .card.dragging {
+      opacity: 0.5;
+      transform: rotate(2deg);
+    }
+
+    .card__label {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+
+    .card__label--blue { background: #dbeafe; color: #1d4ed8; }
+    .card__label--green { background: #dcfce7; color: #15803d; }
+    .card__label--orange { background: #ffedd5; color: #c2410c; }
+    .card__label--purple { background: #ede9fe; color: #6d28d9; }
+
+    .card__title {
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .card__meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .card__avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-left: auto;
+    }
+
+    /* Add card button */
+    .column__add {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: none;
+      background: transparent;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 14px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .column__add:hover {
+      background: rgba(0, 0, 0, 0.06);
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header__logo">
+      <span class="header__logo-icon">◆</span>
+      Prism
+    </div>
+    <div class="header__divider"></div>
+    <h1 class="header__title">Product Roadmap</h1>
+  </header>
+
+  <main class="board">
+    <!-- To Do -->
+    <section class="column" data-column="todo">
+      <div class="column__header">
+        <h2 class="column__title">To Do</h2>
+        <span class="column__count">3</span>
+      </div>
+      <div class="column__cards" data-dropzone>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--blue">Design</span>
+          <h3 class="card__title">Create wireframes for dashboard</h3>
+          <div class="card__meta">
+            <span>Due Aug 30</span>
+            <span class="card__avatar">HG</span>
+          </div>
+        </article>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--purple">Research</span>
+          <h3 class="card__title">Competitive analysis report</h3>
+          <div class="card__meta">
+            <span>Due Sep 2</span>
+            <span class="card__avatar">MK</span>
+          </div>
+        </article>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--green">Content</span>
+          <h3 class="card__title">Write onboarding copy</h3>
+          <div class="card__meta">
+            <span>Due Sep 5</span>
+            <span class="card__avatar">AL</span>
+          </div>
+        </article>
+      </div>
+      <button class="column__add" type="button">+ Add a card</button>
+    </section>
+
+    <!-- In Progress -->
+    <section class="column" data-column="progress">
+      <div class="column__header">
+        <h2 class="column__title">In Progress</h2>
+        <span class="column__count">2</span>
+      </div>
+      <div class="column__cards" data-dropzone>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--orange">Dev</span>
+          <h3 class="card__title">Implement user authentication</h3>
+          <div class="card__meta">
+            <span>Due Aug 28</span>
+            <span class="card__avatar">JD</span>
+          </div>
+        </article>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--blue">Design</span>
+          <h3 class="card__title">Design system components</h3>
+          <div class="card__meta">
+            <span>Due Aug 31</span>
+            <span class="card__avatar">HG</span>
+          </div>
+        </article>
+      </div>
+      <button class="column__add" type="button">+ Add a card</button>
+    </section>
+
+    <!-- Done -->
+    <section class="column" data-column="done">
+      <div class="column__header">
+        <h2 class="column__title">Done</h2>
+        <span class="column__count">2</span>
+      </div>
+      <div class="column__cards" data-dropzone>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--green">Setup</span>
+          <h3 class="card__title">Project scaffolding & CI</h3>
+          <div class="card__meta">
+            <span>Completed</span>
+            <span class="card__avatar">JD</span>
+          </div>
+        </article>
+        <article class="card" draggable="true">
+          <span class="card__label card__label--purple">Planning</span>
+          <h3 class="card__title">Define MVP scope</h3>
+          <div class="card__meta">
+            <span>Completed</span>
+            <span class="card__avatar">MK</span>
+          </div>
+        </article>
+      </div>
+      <button class="column__add" type="button">+ Add a card</button>
+    </section>
+  </main>
+
+  <script>
+    let draggedCard = null;
+
+    document.querySelectorAll('.card').forEach(card => {
+      card.addEventListener('dragstart', (e) => {
+        draggedCard = card;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        draggedCard = null;
+        document.querySelectorAll('[data-dropzone]').forEach(zone => {
+          zone.classList.remove('drag-over');
+        });
+        updateCounts();
+      });
+    });
+
+    document.querySelectorAll('[data-dropzone]').forEach(zone => {
+      zone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        zone.classList.add('drag-over');
+        const afterElement = getDragAfterElement(zone, e.clientY);
+        if (afterElement == null) {
+          zone.appendChild(draggedCard);
+        } else {
+          zone.insertBefore(draggedCard, afterElement);
+        }
+      });
+
+      zone.addEventListener('dragleave', (e) => {
+        if (!zone.contains(e.relatedTarget)) {
+          zone.classList.remove('drag-over');
+        }
+      });
+
+      zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+      });
+    });
+
+    function getDragAfterElement(container, y) {
+      const cards = [...container.querySelectorAll('.card:not(.dragging)')];
+      return cards.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          return { offset, element: child };
+        }
+        return closest;
+      }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    function updateCounts() {
+      document.querySelectorAll('.column').forEach(column => {
+        const count = column.querySelectorAll('.card').length;
+        column.querySelector('.column__count').textContent = count;
+      });
+    }
+  </script>
+</body>
+</html>
