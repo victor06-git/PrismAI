@@ -11,11 +11,14 @@ interface ListeningBarProps {
   listening: boolean;
   onTogglePause: () => void;
   onComplete?: () => void;
+  level?: number;
 }
 
 export function ListeningBar({
   listening,
   onTogglePause,
+  onComplete,
+  level = 0,
 }: ListeningBarProps) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-6 pb-6">
@@ -43,7 +46,7 @@ export function ListeningBar({
                   listening && "animate-waveform",
                 )}
                 style={{
-                  height: `${Math.max(height * 100, 16)}%`,
+                  height: `${Math.max((listening ? Math.max(level, 0.12) : 0.16) * height * 100, 16)}%`,
                   animationDelay: listening
                     ? `${(index % 8) * 0.08}s`
                     : undefined,
@@ -54,6 +57,16 @@ export function ListeningBar({
             ))}
           </div>
         </div>
+
+        {onComplete && (
+          <button
+            type="button"
+            onClick={onComplete}
+            className="rounded-full bg-prisma-text px-3 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-[#3A3A3A]"
+          >
+            Finish
+          </button>
+        )}
       </div>
     </div>
   );
