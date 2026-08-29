@@ -14,6 +14,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from typing import Any
+
 # ---------------------------------------------------------------------------
 # 1. Software Backlog (Scrum / Jira style)
 # ---------------------------------------------------------------------------
@@ -110,10 +112,19 @@ class GenerateAssetResponse(BaseModel):
 
 
 class DataInsightsRequest(BaseModel):
+    meetingId: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Meeting identifier."
+    )
+
     transcript: str = Field(
-        description="Meeting transcript / conversation context to enrich with Cala analytics."
+        min_length=3,
+        max_length=5000,
+        description="Meeting context or query to enrich with Cala."
     )
 
 
 class DataInsightsResponse(BaseModel):
-    dataInsights: list[CalaDataInsight]
+    results: list[dict[str, Any]]
+    entities: list[dict[str, Any]]

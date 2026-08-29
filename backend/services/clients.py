@@ -81,38 +81,48 @@ CALA_API_KEY = os.getenv("CALA_API_KEY")
 # transparently fall back to mock insights (see services/cala_service.py).
 CALA_API_BASE_URL = os.getenv("CALA_API_BASE_URL", "https://api.cala.example.com/v1")
 
-if not CALA_API_KEY:
-    logger.warning(
-        "CALA_API_KEY is not set — /api/data-insights will use fallback behavior. "
-        "Copy .env.example to .env and set your key to enable live generation."
-    )
+CALA_API_BASE_URL = os.getenv(
+    "CALA_API_BASE_URL",
+    "https://api.cala.ai/v1"
+)
 
+def call_cala_api(
+    path: str,
+    payload: dict,
+    method: str = "POST",
+    timeout: float = 60.0
+) -> dict:
 
-def call_cala_api(path: str, payload: dict, method: str = "POST", timeout: float = 15.0) -> dict:
-    """
-    Clean, low-level authenticated call to the Cala analytics API.
-
-    Raises MissingAPIKeyError if CALA_API_KEY isn't configured, or
-    UpstreamServiceError if the request fails, times out, or returns a
-    non-2xx response. Callers (see cala_service.py) don't need to know
-    anything about HTTP/auth — just the endpoint path and JSON payload.
-    """
     if not CALA_API_KEY:
-        raise MissingAPIKeyError("CALA_API_KEY is not configured.")
+        raise MissingAPIKeyError(
+            "CALA_API_KEY is not configured."
+        )
 
     url = f"{CALA_API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
+
     headers = {
-        "Authorization": f"Bearer {CALA_API_KEY}",
+        "X-API-KEY": CALA_API_KEY,
         "Content-Type": "application/json",
     }
 
     try:
-        response = httpx.request(method, url, json=payload, headers=headers, timeout=timeout)
+        response = httpx.request(
+            method,
+            url,
+            json=payload,
+            headers=headers,
+            timeout=timeout
+        )
+
         response.raise_for_status()
         return response.json()
+
     except httpx.HTTPStatusError as exc:
         raise UpstreamServiceError(
-            f"Cala API returned {exc.response.status_code}: {exc.response.text}"
+            f"Cala API returned {exc.response.status_code}"
         ) from exc
+
     except httpx.RequestError as exc:
-        raise UpstreamServiceError(f"Cala API request failed: {exc}") from exc
+        raise UpstreamServiceError(
+            "Cala API request failed"
+        ) from exc

@@ -134,11 +134,25 @@ def get_meeting(meeting_id: str):
 
         return dict(row) if row else None
 
+def get_context_by_meeting(meeting_id: str):
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, meeting_id, type, value, created_at
+            FROM context_insights
+            WHERE meeting_id = ?
+            ORDER BY created_at DESC
+            """,
+            (meeting_id,)
+        ).fetchall()
+
+        return [dict(row) for row in rows]
+
 if __name__ == "__main__":
     init_db()
 
     meeting = get_meeting("demo-1")
     print("Meeting:", meeting)
 
-    assets = get_assets_by_meeting("demo-1")
-    print("Assets:", assets)
+    contexts = get_context_by_meeting("demo-1")
+    print("Contexts:", contexts)

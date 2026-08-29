@@ -15,6 +15,7 @@ Run locally with:
     uvicorn main:app --reload --port 8000
 """
 
+import json
 from typing import Callable
 
 from fastapi import FastAPI, HTTPException
@@ -31,6 +32,7 @@ from database import (
     save_asset,
     save_meeting,
     get_meeting,
+    save_context,
 )
 
 from schemas import (
@@ -181,20 +183,53 @@ async def generate_asset(payload: GenerateAssetRequest) -> GenerateAssetResponse
 
 
 @app.post("/api/data-insights", response_model=DataInsightsResponse)
-async def data_insights(payload: DataInsightsRequest) -> DataInsightsResponse:
-    """Query/enrich Cala-style ('Skip the Data') analytics from the live conversation context."""
-    if not payload.transcript.strip():
-        raise HTTPException(status_code=422, detail="transcript must not be empty.")
-
-    def fallback() -> DataInsightsResponse:
-        return DataInsightsResponse(**MOCK_DATA_INSIGHTS_RESPONSE)
-
+async def data_insights(payload: DataInsightsRequest):
     try:
-        insights = await run_in_threadpool(fetch_data_insights, payload.transcript)
-        return DataInsightsResponse(dataInsights=insights)
-    except MissingAPIKeyError as exc:
-        return _resolve_with_fallback("data-insights", exc, 500, fallback)
-    except UpstreamServiceError as exc:
-        return _resolve_with_fallback("data-insights", exc, 502, fallback)
-    except Exception as exc:
-        return _resolve_with_fallback("data-insights", exc, 500, fallback)
+        # Consultar Cala
+        cala_data = await run_in_threadpool(
+            fetch_data_insights,
+            payload.transcript
+        )
+
+        results = cala_data.get("results", [])[:8]
+        entities = cala_data.get("entities", [])[:8]
+
+        # Asegurar que existe la reunión
+        if not get_meeting(payload.meetingId):
+            save_meeting(payload.meetingId, payload.transcript)
+
+        # Guardar resultado de Cala en SQLite
+        save_context(
+            meeting_id=payload.meetingId,
+            context_type="cala_results",
+            value=json.dumps(results)
+        )
+
+        save_context(
+            meeting_id=payload.meetingId,
+            context_type="cala_entities",
+            value=json.dumps(entities)
+        )
+
+        return DataInsightsResponse(
+            results=results,
+            entities=entities
+        )
+
+    except MissingAPIKeyError:
+        raise HTTPException(
+            status_code=500,
+            detail="Cala API is not configured."
+        )
+
+    except UpstreamServiceError:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve Cala insights."
+        )
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to process data insights."
+        )
