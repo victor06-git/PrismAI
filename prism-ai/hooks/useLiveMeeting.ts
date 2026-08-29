@@ -5,8 +5,9 @@
  * transcript, tickets, concepts, kpiInsights, toasts, startMeeting/stopMeeting/
  * reset/dismissToast/formatElapsed) so MeetingPanel/TranscriptPanel/SprintPanel/
  * MoodboardPanel/KpiPanel/ContextPanel plug in unchanged — but every value
- * comes from an actual microphone recording run through the real backend
- * pipeline (Whisper -> OpenAI -> Fal.ai + Cala), never a staged demo timer.
+ * streams in live from the WebSocket /ws/live pipeline (Whisper -> OpenAI ->
+ * Fal.ai + Cala) as the meeting happens, appended progressively rather than
+ * arriving in one batch at the end.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -20,9 +21,9 @@ import type {
   ToastMessage,
   TranscriptLine,
 } from "@/types";
-import { ApiError, transcribeAndProcess } from "@/lib/api";
-import { adaptMeetingResult, adaptTranscriptLine } from "@/lib/adapters";
-import { useAudioRecorder } from "./useAudioRecorder";
+import type { LiveServerEvent } from "@/lib/backendTypes";
+import { adaptContextInsightFromTicket, adaptCreativeConcept, adaptKpiInsight, adaptTicket, adaptTranscriptLine } from "@/lib/adapters";
+import { useLiveAudioStream, type LiveStreamStatus } from "./useLiveAudioStream";
 
 interface LiveMeetingState {
   phase: MeetingPhase;
@@ -43,6 +44,16 @@ const EMPTY_STATE: LiveMeetingState = {
   kpiInsights: [],
   toasts: [],
 };
+
+// Each live segment is a fixed ~4s slice (see useLiveAudioStream) — used to
+// give transcript lines an approximate, honestly-labelled timestamp, since
+// the backend only knows "this was segment N", not real wall-clock offsets.
+const SEGMENT_SECONDS = 4;
+
+function phaseForStatus(streamStatus: LiveStreamStatus): MeetingPhase {
+  if (streamStatus === "streaming" || streamStatus === "paused" || streamStatus === "connecting") return "listening";
+  return "review";
+}
 
 export function useLiveMeeting() {
   const [state, setState] = useState<LiveMeetingState>(EMPTY_STATE);
@@ -65,72 +76,80 @@ export function useLiveMeeting() {
     setState((prev) => ({ ...prev, toasts: prev.toasts.filter((t) => t.id !== id) }));
   }, []);
 
-  const handleRecordingComplete = useCallback(
-    async (blob: Blob, mimeType: string) => {
-      const meetingId = meetingIdRef.current ?? crypto.randomUUID();
-      meetingIdRef.current = meetingId;
-      setState((prev) => ({ ...prev, phase: "processing" }));
-      addToast("Processing recording", "Transcribing with Whisper and analyzing…", "info");
-
-      const extension = mimeType.includes("webm") ? "webm" : mimeType.includes("mp4") ? "m4a" : "ogg";
-
-      try {
-        const result = await transcribeAndProcess(blob, `recording.${extension}`, meetingId);
-        const { tickets, concepts, kpiInsights, contextInsights } = adaptMeetingResult(result);
+  const handleLiveEvent = useCallback((event: LiveServerEvent) => {
+    switch (event.type) {
+      case "TRANSCRIPT_UPDATE": {
+        const line = adaptTranscriptLine({
+          index: event.segmentIndex,
+          start: (event.segmentIndex - 1) * SEGMENT_SECONDS,
+          end: event.segmentIndex * SEGMENT_SECONDS,
+          text: event.text,
+        });
+        setState((prev) => ({ ...prev, transcript: [...prev.transcript, line] }));
+        break;
+      }
+      case "NEW_TICKET": {
         setState((prev) => ({
           ...prev,
-          phase: "review",
-          transcript: result.segments.map(adaptTranscriptLine),
-          insights: contextInsights,
-          tickets,
-          concepts,
-          kpiInsights,
+          tickets: [...prev.tickets, adaptTicket(event.ticket, prev.tickets.length)],
+          insights: [...prev.insights, adaptContextInsightFromTicket(event.ticket)],
         }));
-        addToast(
-          "Meeting deliverables ready",
-          `${tickets.length} tickets, ${concepts.length} visual concepts, ${kpiInsights.length} insights`,
-          "success",
-        );
-      } catch (err) {
-        setState((prev) => ({ ...prev, phase: "review" }));
-        addToast(
-          "Processing failed",
-          err instanceof ApiError ? err.message : "Something went wrong processing the recording.",
-          "error",
-        );
+        break;
       }
-    },
-    [addToast],
-  );
+      case "MOODBOARD_IMAGE": {
+        setState((prev) => ({
+          ...prev,
+          concepts: [
+            ...prev.concepts,
+            adaptCreativeConcept(
+              { assetName: event.assetName, falPrompt: event.falPrompt, imageUrl: event.imageUrl },
+              prev.concepts.length,
+            ),
+          ],
+        }));
+        break;
+      }
+      case "CALA_METRIC": {
+        setState((prev) => ({ ...prev, kpiInsights: [...prev.kpiInsights, adaptKpiInsight(event.insight)] }));
+        break;
+      }
+      case "ERROR": {
+        addToast("Live pipeline issue", event.message, "warning");
+        break;
+      }
+      case "STATUS":
+        break; // "ready"/"analyzing" narration — no UI action needed beyond the stream's own status
+    }
+  }, [addToast]);
 
-  const handleRecorderError = useCallback(
+  const handleStreamError = useCallback(
     (message: string) => {
-      addToast("Could not start recording", message, "error");
+      addToast("Could not start live session", message, "error");
       setState((prev) => ({ ...prev, phase: "idle" }));
     },
     [addToast],
   );
 
-  const recorder = useAudioRecorder(handleRecordingComplete, handleRecorderError);
+  const stream = useLiveAudioStream(handleLiveEvent, handleStreamError);
 
   const startMeeting = useCallback(() => {
     meetingIdRef.current = crypto.randomUUID();
     setState({ ...EMPTY_STATE, phase: "listening" });
-    addToast("Meeting started", "Recording your microphone…", "info");
-    void recorder.start();
-  }, [recorder, addToast]);
+    addToast("Meeting started", "Streaming your microphone live…", "info");
+    void stream.start(meetingIdRef.current);
+  }, [stream, addToast]);
 
   const stopMeeting = useCallback(() => {
-    // recorder.onstop -> handleRecordingComplete fires async and carries the
-    // phase forward: listening -> processing -> review.
-    recorder.stop();
-  }, [recorder]);
+    stream.stop();
+    setState((prev) => ({ ...prev, phase: "review" }));
+    addToast("Meeting ended", "Review generated deliverables below.", "success");
+  }, [stream, addToast]);
 
   const reset = useCallback(() => {
-    recorder.reset();
+    stream.reset();
     meetingIdRef.current = null;
     setState(EMPTY_STATE);
-  }, [recorder]);
+  }, [stream]);
 
   const formatElapsed = useCallback((seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -140,9 +159,16 @@ export function useLiveMeeting() {
 
   return {
     ...state,
+    // Once a meeting is running, let the stream's own connection status
+    // drive the phase (covers "paused" without a dedicated toggle here);
+    // once stopped, stay in "review" (set explicitly by stopMeeting/reset).
+    phase: state.phase === "idle" ? "idle" : state.phase === "review" ? "review" : phaseForStatus(stream.status),
     teamMembers,
-    elapsedSeconds: recorder.elapsedSeconds,
-    isListening: recorder.status === "recording",
+    elapsedSeconds: stream.elapsedSeconds,
+    isListening: stream.status === "streaming",
+    isPaused: stream.status === "paused",
+    audioLevel: stream.audioLevel,
+    togglePause: stream.togglePause,
     startMeeting,
     stopMeeting,
     reset,

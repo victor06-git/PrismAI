@@ -8,5 +8,6 @@ python-dotenv
 PyJWT
 email-validator
 python-multipart
+slowapi
 pytest
 pytest-asyncio

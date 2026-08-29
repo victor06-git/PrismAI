@@ -9,6 +9,9 @@
  * "confidence" scores, insight priority) are filled with clearly-labelled,
  * deterministic defaults — never random/fabricated content standing in for
  * something the pipeline actually said.
+ *
+ * Every string that ends up on screen is run through sanitizeText() here —
+ * this is the single choke point where backend text becomes UI text.
  */
 
 import type {
@@ -18,12 +21,19 @@ import type {
   BackendTranscriptSegment,
   BackendVisualAsset,
 } from "./backendTypes";
+import { sanitizeText } from "./sanitize";
 import type { AiInsight, CreativeConcept, KpiInsight, Ticket, TicketPriority, TranscriptLine } from "@/types";
 
 const PRIORITY_MAP: Record<BackendTicket["priority"], TicketPriority> = {
   High: "high",
   Medium: "medium",
   Low: "low",
+};
+
+const CONFIDENCE_BY_PRIORITY: Record<BackendTicket["priority"], number> = {
+  High: 0.95,
+  Medium: 0.85,
+  Low: 0.75,
 };
 
 const CONCEPT_GRADIENTS = [
@@ -45,8 +55,8 @@ export function adaptTicket(ticket: BackendTicket, index: number): Ticket {
   return {
     id: ticket.id || `tk-${index}`,
     key: ticket.id,
-    summary: ticket.title,
-    description: ticket.acceptanceCriteria.join(" "),
+    summary: sanitizeText(ticket.title),
+    description: sanitizeText(ticket.acceptanceCriteria.join(" ")),
     status: "todo",
     priority: PRIORITY_MAP[ticket.priority],
     type: "story",
@@ -61,8 +71,8 @@ export function adaptTicket(ticket: BackendTicket, index: number): Ticket {
 export function adaptCreativeConcept(asset: BackendVisualAsset, index: number): CreativeConcept {
   return {
     id: `concept-${index}-${asset.assetName}`,
-    title: asset.assetName,
-    description: asset.falPrompt,
+    title: sanitizeText(asset.assetName),
+    description: sanitizeText(asset.falPrompt),
     tags: ["moodboard", "ai-generated"],
     gradient: CONCEPT_GRADIENTS[index % CONCEPT_GRADIENTS.length],
     icon: CONCEPT_ICONS[index % CONCEPT_ICONS.length],
@@ -73,11 +83,11 @@ export function adaptCreativeConcept(asset: BackendVisualAsset, index: number): 
 export function adaptKpiInsight(insight: BackendDataInsight): KpiInsight {
   return {
     id: insight.id,
-    question: insight.question,
-    metric: insight.metricTarget,
+    question: sanitizeText(insight.question),
+    metric: sanitizeText(insight.metricTarget),
     trend: insight.trend === "flat" ? "neutral" : insight.trend,
-    value: insight.value,
-    context: insight.summary,
+    value: sanitizeText(insight.value),
+    context: sanitizeText(insight.summary),
     // The backend doesn't score insight priority — a downward trend is the
     // one case worth flagging by default; everything else defaults to medium.
     priority: insight.trend === "down" ? "high" : "medium",
@@ -90,8 +100,18 @@ export function adaptTranscriptLine(segment: BackendTranscriptSegment): Transcri
     // whisper-1 doesn't do speaker diarization on a single mic feed — "You"
     // is an honest label, not a guessed name.
     speaker: "You",
-    text: segment.text,
+    text: sanitizeText(segment.text),
     timestamp: formatTimestamp(segment.start),
+  };
+}
+
+/** Same per-ticket "AI Understanding" mapping used by deriveContextInsights — exposed separately for the live (one-ticket-at-a-time) stream. */
+export function adaptContextInsightFromTicket(ticket: BackendTicket): AiInsight {
+  return {
+    id: `ctx-${ticket.id}`,
+    type: "task",
+    text: sanitizeText(ticket.title),
+    confidence: CONFIDENCE_BY_PRIORITY[ticket.priority],
   };
 }
 
@@ -100,23 +120,10 @@ export function deriveContextInsights(result: BackendMeetingResult): AiInsight[]
   const insights: AiInsight[] = [];
 
   if (result.summary) {
-    insights.push({ id: "ctx-summary", type: "decision", text: result.summary, confidence: 0.92 });
+    insights.push({ id: "ctx-summary", type: "decision", text: sanitizeText(result.summary), confidence: 0.92 });
   }
 
-  const CONFIDENCE_BY_PRIORITY: Record<BackendTicket["priority"], number> = {
-    High: 0.95,
-    Medium: 0.85,
-    Low: 0.75,
-  };
-
-  result.tickets.forEach((ticket, index) => {
-    insights.push({
-      id: `ctx-ticket-${index}`,
-      type: "task",
-      text: ticket.title,
-      confidence: CONFIDENCE_BY_PRIORITY[ticket.priority],
-    });
-  });
+  result.tickets.forEach((ticket) => insights.push(adaptContextInsightFromTicket(ticket)));
 
   return insights;
 }

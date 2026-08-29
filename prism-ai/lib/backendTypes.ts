@@ -59,3 +59,19 @@ export interface AudioProcessResponse extends BackendMeetingResult {
 export interface GenerateAssetResponse {
   imageUrl: string;
 }
+
+// ---------------------------------------------------------------------------
+// WebSocket /ws/live — see backend/audio/live_session.py for the full protocol
+// ---------------------------------------------------------------------------
+
+export type LiveClientMessage =
+  | { type: "init"; meetingId?: string }
+  | { type: "stop" };
+
+export type LiveServerEvent =
+  | { type: "STATUS"; stage: string; meetingId?: string }
+  | { type: "TRANSCRIPT_UPDATE"; text: string; cumulativeText: string; segmentIndex: number }
+  | { type: "NEW_TICKET"; ticket: BackendTicket }
+  | { type: "MOODBOARD_IMAGE"; assetName: string; falPrompt: string; imageUrl: string }
+  | { type: "CALA_METRIC"; insight: BackendDataInsight }
+  | { type: "ERROR"; message: string };

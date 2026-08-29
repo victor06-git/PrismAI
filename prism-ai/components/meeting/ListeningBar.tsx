@@ -11,12 +11,19 @@ interface ListeningBarProps {
   listening: boolean;
   onTogglePause: () => void;
   onComplete?: () => void;
+  /** 0..1 real mic input level (from useLiveAudioStream/useAudioRecorder) — when
+   * provided, bars pulse with the actual microphone signal instead of the
+   * canned CSS waveform animation. */
+  level?: number;
 }
 
 export function ListeningBar({
   listening,
   onTogglePause,
+  level,
 }: ListeningBarProps) {
+  const isLive = level !== undefined;
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-6 pb-6">
       <div
@@ -35,23 +42,27 @@ export function ListeningBar({
 
         <div className="flex h-6 w-[72px] items-center justify-center rounded-full bg-prisma-text px-2">
           <div className="flex h-2.5 w-full items-end justify-center gap-[1.5px]">
-            {WAVE_BARS.map((height, index) => (
-              <span
-                key={index}
-                className={cn(
-                  "w-[1.5px] rounded-full bg-white",
-                  listening && "animate-waveform",
-                )}
-                style={{
-                  height: `${Math.max(height * 100, 16)}%`,
-                  animationDelay: listening
-                    ? `${(index % 8) * 0.08}s`
-                    : undefined,
-                  opacity: listening ? 1 : 0.4,
-                  transform: listening ? undefined : "scaleY(0.35)",
-                }}
-              />
-            ))}
+            {WAVE_BARS.map((shapeRatio, index) => {
+              const heightPct = isLive
+                ? Math.max((listening ? (level ?? 0) : 0) * shapeRatio * 100, 16)
+                : Math.max(shapeRatio * 100, 16);
+              return (
+                <span
+                  key={index}
+                  className={cn(
+                    "w-[1.5px] rounded-full bg-white",
+                    !isLive && listening && "animate-waveform",
+                    isLive && "transition-[height] duration-75",
+                  )}
+                  style={{
+                    height: `${heightPct}%`,
+                    animationDelay: !isLive && listening ? `${(index % 8) * 0.08}s` : undefined,
+                    opacity: listening ? 1 : 0.4,
+                    transform: !isLive && !listening ? "scaleY(0.35)" : undefined,
+                  }}
+                />
+              );
+            })}
           </div>
         </div>
       </div>

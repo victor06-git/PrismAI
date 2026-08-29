@@ -25,6 +25,8 @@ interface MeetingPanelProps {
   transcriptCount: number;
   ticketCount: number;
   insightCount: number;
+  /** 0..1 real mic input level — drives the visualizer's pulse when provided. */
+  audioLevel?: number;
 }
 
 export function MeetingPanel({
@@ -38,6 +40,7 @@ export function MeetingPanel({
   transcriptCount,
   ticketCount,
   insightCount,
+  audioLevel,
 }: MeetingPanelProps) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
@@ -70,6 +73,7 @@ export function MeetingPanel({
             ticketCount={ticketCount}
             insightCount={insightCount}
             onStop={onStop}
+            audioLevel={audioLevel}
           />
         )}
 
@@ -155,17 +159,19 @@ function ListeningState({
   ticketCount,
   insightCount,
   onStop,
+  audioLevel,
 }: {
   elapsed: string;
   transcriptCount: number;
   ticketCount: number;
   insightCount: number;
   onStop: () => void;
+  audioLevel?: number;
 }) {
   return (
     <div>
       <div className="flex items-center justify-center gap-8 mb-6">
-        <ListeningVisualizer />
+        <ListeningVisualizer level={audioLevel} />
       </div>
 
       <div className="grid grid-cols-4 gap-3 mb-6">
@@ -220,21 +226,30 @@ function ReviewState({
   );
 }
 
-function ListeningVisualizer() {
+function ListeningVisualizer({ level }: { level?: number }) {
+  const isLive = level !== undefined;
+
   return (
     <div className="flex items-center gap-1 h-16">
-      {Array.from({ length: 24 }).map((_, i) => (
-        <div
-          key={i}
-          className="w-1 bg-blue-500 rounded-full animate-waveform"
-          style={{
-            animationDelay: `${i * 0.05}s`,
-            // Deterministic per-bar variance (no Math.random — that's an
-            // impure call during render and risks a server/client mismatch).
-            height: `${20 + Math.sin(i * 0.5) * 30 + Math.abs(Math.sin(i * 7.13)) * 20}%`,
-          }}
-        />
-      ))}
+      {Array.from({ length: 24 }).map((_, i) => {
+        // Deterministic per-bar shape (no Math.random — that's an impure
+        // call during render and risks a server/client hydration mismatch).
+        const shape = 20 + Math.sin(i * 0.5) * 30 + Math.abs(Math.sin(i * 7.13)) * 20;
+        const height = isLive ? Math.max((level ?? 0) * (shape / 70) * 100, 8) : shape;
+        return (
+          <div
+            key={i}
+            className={cn(
+              "w-1 bg-blue-500 rounded-full",
+              isLive ? "transition-[height] duration-75" : "animate-waveform",
+            )}
+            style={{
+              animationDelay: isLive ? undefined : `${i * 0.05}s`,
+              height: `${height}%`,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

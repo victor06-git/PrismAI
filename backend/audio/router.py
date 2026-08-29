@@ -39,11 +39,12 @@ import json
 from typing import AsyncIterator
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from database import save_asset, save_context, save_meeting
 from mock_data import MOCK_PROCESS_MEETING_RESPONSE
+from rate_limit import limiter
 from schemas import AudioProcessResponse, ProcessMeetingResponse, VisualAssetPrompt
 from schemas import TranscriptSegment as TranscriptSegmentSchema
 from services.cala_service import fetch_data_insights_typed
@@ -84,7 +85,8 @@ def _read_and_validate_upload_sync(raw: bytes) -> None:
 
 
 @router.post("/transcribe-and-orchestrate")
-async def transcribe_and_orchestrate(audio: UploadFile = File(...)) -> StreamingResponse:
+@limiter.limit("10/minute")
+async def transcribe_and_orchestrate(request: Request, audio: UploadFile = File(...)) -> StreamingResponse:
     """
     Accepts a recorded audio clip (webm/mp3/wav/m4a/...) and streams the full
     transcribe -> extract -> generate pipeline back as Server-Sent Events.
@@ -260,7 +262,9 @@ async def _enrich_insights(transcript: str, fallback_insights: list) -> list:
 
 
 @router.post("/transcribe-and-process", response_model=AudioProcessResponse)
+@limiter.limit("10/minute")
 async def transcribe_and_process(
+    request: Request,
     audio: UploadFile = File(...),
     meetingId: str | None = Form(None),
 ) -> AudioProcessResponse:

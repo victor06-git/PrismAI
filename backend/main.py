@@ -9,9 +9,13 @@ Turns a raw meeting transcript into three simultaneous outputs:
 Also exposes:
   - A QR-based, passwordless auth flow (see auth/) for the desktop companion
     app: register -> create QR session -> mobile scan -> desktop poll -> JWT.
-  - A real-time speech-to-workflow pipeline (see audio/): record -> Whisper
-    transcription -> structured extraction -> concurrent Fal.ai image
-    generation + Cala enrichment, streamed to the client as SSE.
+  - Two batch speech-to-workflow pipelines (see audio/router.py): record the
+    whole take -> Whisper -> structured extraction -> concurrent Fal.ai
+    image generation + Cala enrichment, either streamed as SSE or returned
+    as one consolidated payload.
+  - A progressive, WebSocket-driven live pipeline (see audio/live_session.py,
+    /ws/live): ~4s audio segments transcribed and appended as they arrive,
+    with tickets/moodboards/insights streamed in as the conversation grows.
 
 This module is intentionally a thin routing/orchestration layer: all external
 API calls live in services/ (openai_service.py, fal_service.py,
@@ -19,17 +23,33 @@ cala_service.py, whisper_service.py), built on shared client setup + custom
 exceptions in services/clients.py. Auth and audio each have their own
 self-contained package (auth/, audio/).
 
+Security notes:
+  - CORS origins come from ALLOWED_ORIGINS (comma-separated) if set, else
+    default to the local Next.js dev origins only — never "*".
+  - Every OpenAI/Fal.ai/Cala-calling route is rate-limited (slowapi, see
+    rate_limit.py) on top of the global per-IP default; /ws/live has its own
+    payload-size + per-chunk-interval + max-concurrent-session guards
+    (slowapi is HTTP-request-based and doesn't cover WebSockets).
+  - OPENAI_API_KEY / FAL_KEY / CALA_API_KEY are read only in
+    services/clients.py and never leave the backend process — the frontend
+    only ever holds NEXT_PUBLIC_API_BASE_URL (a non-secret base URL).
+
 Run locally with:
     uvicorn main:app --reload --port 8000
 """
 
 import json
+import os
 from typing import Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.concurrency import run_in_threadpool
 
+from audio.live_session import websocket_live_session
 from audio.router import router as audio_router
 from auth.router import router as auth_router
 from mock_data import (
@@ -44,6 +64,7 @@ from database import (
     get_meeting,
     save_context,
 )
+from rate_limit import limiter
 
 from schemas import (
     DataInsightsRequest,
@@ -70,18 +91,27 @@ from services.openai_service import generate_meeting_outputs
 app = FastAPI(
     title="PrismAI API",
     description="Real-time meeting copilot: backlog, moodboards & data insights.",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 init_db()
 
-# CORS — allow the Next.js frontend running on localhost to call this API.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# CORS — allow the Next.js frontend to call this API. Override with a
+# comma-separated ALLOWED_ORIGINS env var in non-local environments; never
+# falls back to "*" (that would defeat allow_credentials=True anyway).
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+ALLOWED_ORIGINS = (
+    [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
+    if _allowed_origins_env
+    else ["http://localhost:3000", "http://127.0.0.1:3000"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,6 +119,12 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(audio_router)
+
+
+@app.websocket("/ws/live")
+async def ws_live(websocket: WebSocket) -> None:
+    """Progressive live pipeline — see audio/live_session.py for the full protocol."""
+    await websocket_live_session(websocket)
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +177,8 @@ async def health_check() -> dict:
 
 
 @app.post("/api/process-meeting", response_model=ProcessMeetingResponse)
-async def process_meeting(payload: ProcessMeetingRequest) -> ProcessMeetingResponse:
+@limiter.limit("15/minute")
+async def process_meeting(request: Request, payload: ProcessMeetingRequest) -> ProcessMeetingResponse:
     """
     Analyze a meeting transcript with OpenAI Structured Outputs (gpt-4o-mini)
     and return the backlog + visual asset prompts + data insights at once.
@@ -163,7 +200,8 @@ async def process_meeting(payload: ProcessMeetingRequest) -> ProcessMeetingRespo
 
 
 @app.post("/api/process-text", response_model=ProcessMeetingResponse)
-async def process_text(payload: ProcessTextRequest) -> ProcessMeetingResponse:
+@limiter.limit("15/minute")
+async def process_text(request: Request, payload: ProcessTextRequest) -> ProcessMeetingResponse:
     """
     Fallback / quick-testing endpoint: identical extraction to
     /api/process-meeting, accepting raw text directly — handy for exercising
@@ -191,7 +229,8 @@ async def process_text(payload: ProcessTextRequest) -> ProcessMeetingResponse:
 
 
 @app.post("/api/generate-asset", response_model=GenerateAssetResponse)
-async def generate_asset(payload: GenerateAssetRequest) -> GenerateAssetResponse:
+@limiter.limit("15/minute")
+async def generate_asset(request: Request, payload: GenerateAssetRequest) -> GenerateAssetResponse:
     """Generate a 16:9 mockup/moodboard image via Fal.ai Flux Schnell."""
     if not payload.prompt.strip():
         raise HTTPException(status_code=422, detail="prompt must not be empty.")
@@ -225,7 +264,8 @@ async def generate_asset(payload: GenerateAssetRequest) -> GenerateAssetResponse
 
 
 @app.post("/api/data-insights", response_model=DataInsightsResponse)
-async def data_insights(payload: DataInsightsRequest):
+@limiter.limit("15/minute")
+async def data_insights(request: Request, payload: DataInsightsRequest):
     try:
         # Consultar Cala
         cala_data = await run_in_threadpool(

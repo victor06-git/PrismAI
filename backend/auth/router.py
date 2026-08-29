@@ -9,8 +9,9 @@ QR-based, passwordless auth flow (WhatsApp-Web-style "scan to log in"):
   4. GET  /api/auth/qr-session/poll         — desktop polls until APPROVED, then receives a JWT.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from rate_limit import limiter
 from .schemas import (
     QRSessionCreateResponse,
     QRSessionPollResponse,
@@ -37,7 +38,8 @@ def _user_out(user) -> UserOut:
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
-async def register(payload: RegisterRequest) -> UserOut:
+@limiter.limit("10/minute")
+async def register(request: Request, payload: RegisterRequest) -> UserOut:
     """Create a user account. 409 on duplicate email; 422 on a malformed payload (handled by Pydantic)."""
     try:
         user = auth_store.create_user(email=payload.email, name=payload.name)
@@ -47,7 +49,8 @@ async def register(payload: RegisterRequest) -> UserOut:
 
 
 @router.post("/qr-session/create", response_model=QRSessionCreateResponse, status_code=201)
-async def create_qr_session() -> QRSessionCreateResponse:
+@limiter.limit("20/minute")
+async def create_qr_session(request: Request) -> QRSessionCreateResponse:
     """Desktop calls this to start a login attempt; render session_id+nonce as a QR code."""
     session = auth_store.create_qr_session(ttl_seconds=QR_SESSION_TTL_SECONDS)
     return QRSessionCreateResponse(

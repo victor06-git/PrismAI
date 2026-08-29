@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from auth.store import auth_store
 from main import app
+from rate_limit import limiter
 
 
 @pytest.fixture(autouse=True)
@@ -15,6 +16,18 @@ def _reset_auth_store():
     auth_store.reset()
     yield
     auth_store.reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """
+    All tests share one client IP (httpx's ASGITransport reports a fixed
+    address), so without resetting, the rate limiter's per-IP counters would
+    accumulate across unrelated tests and start rejecting legitimate calls.
+    """
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 @pytest.fixture

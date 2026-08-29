@@ -38,15 +38,7 @@ Be concise, concrete, and grounded strictly in what the transcript discusses.
 """
 
 
-def generate_meeting_outputs(transcript: str) -> ProcessMeetingResponse:
-    """
-    Call OpenAI with Structured Outputs and return a validated
-    ProcessMeetingResponse. Blocking (sync SDK) — call via
-    starlette.concurrency.run_in_threadpool from the route handler.
-
-    Raises MissingAPIKeyError / UpstreamServiceError on failure; callers
-    decide how to respond (HTTPException vs. mock fallback).
-    """
+def _call_structured(system_prompt: str, user_content: str) -> ProcessMeetingResponse:
     if not OPENAI_API_KEY:
         raise MissingAPIKeyError("OPENAI_API_KEY is not configured.")
 
@@ -54,8 +46,8 @@ def generate_meeting_outputs(transcript: str) -> ProcessMeetingResponse:
         completion = openai_client.beta.chat.completions.parse(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": transcript},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
             ],
             response_format=ProcessMeetingResponse,
         )
@@ -67,3 +59,56 @@ def generate_meeting_outputs(transcript: str) -> ProcessMeetingResponse:
         raise UpstreamServiceError(f"OpenAI refused or returned no parsed content: {message.refusal}")
 
     return message.parsed
+
+
+def generate_meeting_outputs(transcript: str) -> ProcessMeetingResponse:
+    """
+    Call OpenAI with Structured Outputs and return a validated
+    ProcessMeetingResponse. Blocking (sync SDK) — call via
+    starlette.concurrency.run_in_threadpool from the route handler.
+
+    Raises MissingAPIKeyError / UpstreamServiceError on failure; callers
+    decide how to respond (HTTPException vs. mock fallback).
+    """
+    return _call_structured(SYSTEM_PROMPT, transcript)
+
+
+def generate_meeting_outputs_incremental(
+    transcript: str,
+    known_ticket_titles: list[str],
+    known_asset_names: list[str],
+) -> ProcessMeetingResponse:
+    """
+    Same extraction, but told what's already been surfaced so far in this
+    live session (see audio/live_session.py). Without this, re-running
+    extraction on the growing transcript every few chunks produces the same
+    underlying idea worded slightly differently each time ("Build login
+    page" vs. "Create Login Page with Inline Validation") — which a plain
+    exact-title dedup can't catch, since the LLM never guarantees stable
+    phrasing between calls. Telling it explicitly what already exists (and
+    to reuse those exact titles for anything still-covered) fixes the
+    dedup at the source instead of trying to fuzzy-match unreliable
+    natural-language titles afterward.
+
+    Blocking — call via asyncio.to_thread. Raises MissingAPIKeyError /
+    UpstreamServiceError on failure.
+    """
+    recap_lines = []
+    if known_ticket_titles:
+        recap_lines.append(
+            "Tickets already created so far (reuse these EXACT titles verbatim if the topic recurs — "
+            "do not reword them): " + "; ".join(known_ticket_titles)
+        )
+    if known_asset_names:
+        recap_lines.append(
+            "Visual assets already created so far (reuse these EXACT names verbatim if the topic "
+            "recurs): " + "; ".join(known_asset_names)
+        )
+
+    incremental_prompt = SYSTEM_PROMPT + (
+        "\n\nThis is a LIVE, still-in-progress meeting — the transcript below grows every few seconds. "
+        "Only invent a new ticket/visual-asset title for topics not already covered. "
+        + (" ".join(recap_lines) if recap_lines else "Nothing has been created yet.")
+    )
+
+    return _call_structured(incremental_prompt, transcript)
