@@ -189,16 +189,19 @@ export function useRealtimeMeeting() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ meetingId: crypto.randomUUID(), prompt: analysis.visualAssets[0].falPrompt }),
+            signal: AbortSignal.timeout(90_000),
           });
-          if (visualResponse.ok) {
-            const { imageUrl } = (await visualResponse.json()) as { imageUrl: string };
-            setResult((current) => current ? {
-              ...current,
-              visualAssets: current.visualAssets.map((asset, index) => index === 0 ? { ...asset, imageUrl } : asset),
-            } : current);
+          if (!visualResponse.ok) {
+            const failure = await visualResponse.json().catch(() => null) as { detail?: string } | null;
+            throw new Error(failure?.detail ?? "Moodboard generation failed.");
           }
-        } catch {
-          // The summary and tickets remain usable when the optional visual fails.
+          const { imageUrl } = (await visualResponse.json()) as { imageUrl: string };
+          setResult((current) => current ? {
+            ...current,
+            visualAssets: current.visualAssets.map((asset, index) => index === 0 ? { ...asset, imageUrl } : asset),
+          } : current);
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "Moodboard generation failed.");
         }
       }
     } catch (cause) {
