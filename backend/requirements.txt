@@ -5,3 +5,4 @@ openai
 fal-client
 httpx
 python-dotenv
+truststore

@@ -24,6 +24,7 @@ export function useRealtimeMeeting() {
   const [audioLevel, setAudioLevel] = useState(0);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const channelRef = useRef<RTCDataChannel | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -41,6 +42,7 @@ export function useRealtimeMeeting() {
     frameRef.current = null;
     streamRef.current = null;
     pcRef.current = null;
+    channelRef.current = null;
     contextRef.current = null;
     setAudioLevel(0);
   }, []);
@@ -82,6 +84,7 @@ export function useRealtimeMeeting() {
       pcRef.current = pc;
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
       const channel = pc.createDataChannel("oai-events");
+      channelRef.current = channel;
       channel.onmessage = (message) => {
         const event = JSON.parse(message.data as string) as { type?: string; item_id?: string; delta?: string; transcript?: string; error?: { message?: string } };
         const itemId = event.item_id ?? "current";
@@ -106,14 +109,23 @@ export function useRealtimeMeeting() {
         timerRef.current = setInterval(() => setElapsed((value) => value + 1), 1000);
       };
 
+      const tokenResponse = await fetch(`${API_URL}/api/realtime/token`, { method: "POST" });
+      if (!tokenResponse.ok) throw new Error((await tokenResponse.json().catch(() => null))?.detail ?? "Could not authorize OpenAI Realtime.");
+      const tokenData = (await tokenResponse.json()) as { value?: string; client_secret?: { value?: string } };
+      const ephemeralKey = tokenData.value ?? tokenData.client_secret?.value;
+      if (!ephemeralKey) throw new Error("OpenAI did not return a temporary Realtime credential.");
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      const response = await fetch(`${API_URL}/api/realtime/session`, {
+      const response = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
-        headers: { "Content-Type": "application/sdp" },
+        headers: {
+          "Authorization": `Bearer ${ephemeralKey}`,
+          "Content-Type": "application/sdp",
+        },
         body: offer.sdp,
       });
-      if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "Could not start OpenAI Realtime.");
+      if (!response.ok) throw new Error(`OpenAI Realtime connection failed (${response.status}).`);
       await pc.setRemoteDescription({ type: "answer", sdp: await response.text() });
     } catch (cause) {
       cleanup();
@@ -123,6 +135,11 @@ export function useRealtimeMeeting() {
   }, [cleanup, monitorLevel]);
 
   const stop = useCallback(async () => {
+    if (channelRef.current?.readyState === "open") {
+      channelRef.current.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+      // Give OpenAI a brief window to emit the final completed transcript.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
     const transcript = [...linesRef.current, ...partialsRef.current.values()].join(" ").trim();
     cleanup();
     if (!transcript) {
@@ -140,17 +157,30 @@ export function useRealtimeMeeting() {
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "Meeting analysis failed.");
       const analysis = (await response.json()) as MeetingResult;
 
-      // Hackathon cost guard: at most one Fal image per completed meeting.
-      if (analysis.visualAssets[0]) {
-        const visualResponse = await fetch(`${API_URL}/api/generate-asset`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ meetingId: crypto.randomUUID(), prompt: analysis.visualAssets[0].falPrompt }),
-        });
-        if (visualResponse.ok) analysis.visualAssets[0].imageUrl = ((await visualResponse.json()) as { imageUrl: string }).imageUrl;
-      }
+      // Show the useful text result immediately. Image generation is slower
+      // and must never block the summary/tickets portion of the demo.
       setResult(analysis);
       setPhase("review");
+
+      // Hackathon cost guard: at most one Fal image per completed meeting.
+      if (analysis.visualAssets[0]) {
+        try {
+          const visualResponse = await fetch(`${API_URL}/api/generate-asset`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ meetingId: crypto.randomUUID(), prompt: analysis.visualAssets[0].falPrompt }),
+          });
+          if (visualResponse.ok) {
+            const { imageUrl } = (await visualResponse.json()) as { imageUrl: string };
+            setResult((current) => current ? {
+              ...current,
+              visualAssets: current.visualAssets.map((asset, index) => index === 0 ? { ...asset, imageUrl } : asset),
+            } : current);
+          }
+        } catch {
+          // The summary and tickets remain usable when the optional visual fails.
+        }
+      }
     } catch (cause) {
       setPhase("error");
       setError(cause instanceof Error ? cause.message : "Meeting analysis failed.");

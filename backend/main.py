@@ -18,11 +18,13 @@ Run locally with:
 import hashlib
 import json
 import os
+import ssl
 import time
 from collections import defaultdict, deque
 from typing import Callable
 
 import httpx
+import truststore
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -146,21 +148,14 @@ async def health_check() -> dict:
     }
 
 
-@app.post("/api/realtime/session")
-async def create_realtime_session(request: Request) -> Response:
-    """Exchange a browser WebRTC offer for OpenAI's SDP answer without exposing the API key."""
+@app.post("/api/realtime/token")
+async def create_realtime_token(request: Request) -> Response:
+    """Mint a short-lived browser credential without exposing the permanent API key."""
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OpenAI is not configured on the server.")
 
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip, "realtime", 5)
-    if request.headers.get("content-type", "").split(";", 1)[0] != "application/sdp":
-        raise HTTPException(status_code=415, detail="Content-Type must be application/sdp.")
-
-    offer = await request.body()
-    if not offer or len(offer) > 64 * 1024:
-        raise HTTPException(status_code=413, detail="Invalid or oversized SDP offer.")
-
     from services.clients import OPENAI_TRANSCRIBE_MODEL
 
     session = {
@@ -173,37 +168,34 @@ async def create_realtime_session(request: Request) -> Response:
                     "delay": "low",
                     "prompt": "Product and software hackathon meeting. Preserve names, acronyms and ticket terminology.",
                 },
-                "turn_detection": {
-                    "type": "server_vad",
-                    "silence_duration_ms": 650,
-                    "prefix_padding_ms": 300,
-                },
+                "turn_detection": None,
             }
         },
     }
     safety_id = hashlib.sha256(f"prismai-demo:{client_ip}".encode()).hexdigest()
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        # Use the native Windows trust store. This supports corporate/local CA
+        # chains while keeping TLS certificate verification fully enabled.
+        tls_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        async with httpx.AsyncClient(timeout=20.0, verify=tls_context) as client:
             upstream = await client.post(
-                "https://api.openai.com/v1/realtime/calls",
+                "https://api.openai.com/v1/realtime/client_secrets",
                 headers={
                     "Authorization": f"Bearer {OPENAI_API_KEY}",
                     "OpenAI-Safety-Identifier": safety_id,
+                    "Content-Type": "application/json",
                 },
-                files={
-                    "sdp": (None, offer.decode("utf-8")),
-                    "session": (None, json.dumps(session)),
-                },
+                json={"session": session},
             )
-    except (httpx.RequestError, UnicodeDecodeError) as exc:
-        logger.error("Realtime session connection failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Could not connect to live transcription.") from exc
+    except httpx.RequestError as exc:
+        logger.error("Realtime token request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not authorize live transcription.") from exc
 
     if upstream.status_code >= 400:
-        logger.error("Realtime session rejected (%s): %s", upstream.status_code, upstream.text[:500])
-        raise HTTPException(status_code=502, detail="OpenAI rejected the live transcription session.")
-    return Response(content=upstream.text, media_type="application/sdp")
+        logger.error("Realtime token rejected (%s): %s", upstream.status_code, upstream.text[:500])
+        raise HTTPException(status_code=502, detail="OpenAI could not authorize live transcription.")
+    return Response(content=upstream.content, media_type="application/json")
 
 
 @app.post("/api/process-meeting", response_model=ProcessMeetingResponse)
