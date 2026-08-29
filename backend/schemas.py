@@ -48,6 +48,13 @@ class VisualAssetPrompt(BaseModel):
     falPrompt: str = Field(
         description="Detailed, descriptive image-generation prompt ready to send to Fal.ai Flux Schnell."
     )
+    imageUrl: str | None = Field(
+        default=None,
+        description=(
+            "Rendered image URL, once generated. Always null straight out of extraction — "
+            "populated later by a Fal.ai call (e.g. the audio pipeline's concurrent generation step)."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
