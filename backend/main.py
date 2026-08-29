@@ -26,7 +26,13 @@ from mock_data import (
     MOCK_GENERATE_ASSET_RESPONSE,
     MOCK_PROCESS_MEETING_RESPONSE,
 )
-from database import init_db, save_asset, save_meeting
+from database import (
+    init_db,
+    save_asset,
+    save_meeting,
+    get_meeting,
+)
+
 from schemas import (
     DataInsightsRequest,
     DataInsightsResponse,
@@ -150,8 +156,22 @@ async def generate_asset(payload: GenerateAssetRequest) -> GenerateAssetResponse
         return GenerateAssetResponse(**MOCK_GENERATE_ASSET_RESPONSE)
 
     try:
-        image_url = await run_in_threadpool(generate_visual_asset, payload.prompt)
+        image_url = await run_in_threadpool(
+            generate_visual_asset,
+            payload.prompt
+        )
+
+        if not get_meeting(payload.meetingId):
+            save_meeting(payload.meetingId, "")
+
+        save_asset(
+            meeting_id=payload.meetingId,
+            prompt=payload.prompt,
+            image_url=image_url
+        )
+
         return GenerateAssetResponse(imageUrl=image_url)
+    
     except MissingAPIKeyError as exc:
         return _resolve_with_fallback("generate-asset", exc, 500, fallback)
     except UpstreamServiceError as exc:

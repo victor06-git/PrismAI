@@ -92,6 +92,19 @@ def save_asset(meeting_id: str, prompt: str, image_url: str):
 
         return cursor.lastrowid
 
+def get_assets_by_meeting(meeting_id: str):
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, meeting_id, prompt, image_url, created_at
+            FROM assets
+            WHERE meeting_id = ?
+            ORDER BY created_at DESC
+            """,
+            (meeting_id,)
+        ).fetchall()
+
+        return [dict(row) for row in rows]
 
 def save_context(meeting_id: str, context_type: str, value: str):
     now = datetime.now(timezone.utc).isoformat()
@@ -124,12 +137,8 @@ def get_meeting(meeting_id: str):
 if __name__ == "__main__":
     init_db()
 
-    save_meeting(
-        "demo-1",
-        "We need a modern landing page for a productivity SaaS."
-    )
-    
-
     meeting = get_meeting("demo-1")
+    print("Meeting:", meeting)
 
-    print(meeting)
+    assets = get_assets_by_meeting("demo-1")
+    print("Assets:", assets)
