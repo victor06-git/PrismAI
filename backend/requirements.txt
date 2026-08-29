@@ -5,3 +5,8 @@ openai
 fal-client
 httpx
 python-dotenv
+PyJWT
+email-validator
+python-multipart
+pytest
+pytest-asyncio

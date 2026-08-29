@@ -6,10 +6,18 @@ Turns a raw meeting transcript into three simultaneous outputs:
   2. Moodboard / visual creative prompts, rendered as images via Fal.ai Flux Schnell.
   3. Cala-style ("Skip the Data") analytics insights.
 
+Also exposes:
+  - A QR-based, passwordless auth flow (see auth/) for the desktop companion
+    app: register -> create QR session -> mobile scan -> desktop poll -> JWT.
+  - A real-time speech-to-workflow pipeline (see audio/): record -> Whisper
+    transcription -> structured extraction -> concurrent Fal.ai image
+    generation + Cala enrichment, streamed to the client as SSE.
+
 This module is intentionally a thin routing/orchestration layer: all external
 API calls live in services/ (openai_service.py, fal_service.py,
-cala_service.py), built on shared client setup + custom exceptions in
-services/clients.py.
+cala_service.py, whisper_service.py), built on shared client setup + custom
+exceptions in services/clients.py. Auth and audio each have their own
+self-contained package (auth/, audio/).
 
 Run locally with:
     uvicorn main:app --reload --port 8000
@@ -21,6 +29,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
+from audio.router import router as audio_router
+from auth.router import router as auth_router
 from mock_data import (
     MOCK_DATA_INSIGHTS_RESPONSE,
     MOCK_GENERATE_ASSET_RESPONSE,
@@ -50,7 +60,7 @@ from services.openai_service import generate_meeting_outputs
 app = FastAPI(
     title="PrismAI API",
     description="Real-time meeting copilot: backlog, moodboards & data insights.",
-    version="0.2.0",
+    version="0.4.0",
 )
 
 # CORS — allow the Next.js frontend running on localhost to call this API.
@@ -64,6 +74,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
+app.include_router(audio_router)
 
 
 # ---------------------------------------------------------------------------
