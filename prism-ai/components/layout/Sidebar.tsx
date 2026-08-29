@@ -19,7 +19,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { PRODUCT_NAME } from "@/data/mockData";
+import { PRODUCT_NAME } from "@/data/appConfig";
 
 interface SidebarProps {
   collapsed: boolean;

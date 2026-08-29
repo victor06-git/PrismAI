@@ -2,13 +2,13 @@
  * Translates the backend's canonical Pydantic-shaped responses
  * (lib/backendTypes.ts) into the frontend's richer, already-designed domain
  * types (types/index.ts) — so TicketCard, CreativeCard, KpiPanel,
- * TranscriptPanel etc. all keep working unchanged, now fed by real data
- * instead of the setTimeout-staggered mocks in data/mockData.ts.
+ * TranscriptPanel etc. all keep working, fed entirely by real data (there
+ * is no mock data anywhere in this project — backend or frontend).
  *
- * A few fields the backend simply doesn't produce (assignee, sprint, AI
- * "confidence" scores, insight priority) are filled with clearly-labelled,
- * deterministic defaults — never random/fabricated content standing in for
- * something the pipeline actually said.
+ * A couple of fields the backend doesn't produce (assignee, sprint) are
+ * filled with clearly-labelled, deterministic defaults — never
+ * random/fabricated content standing in for something the pipeline
+ * actually said.
  *
  * Every string that ends up on screen is run through sanitizeText() here —
  * this is the single choke point where backend text becomes UI text.
@@ -19,21 +19,24 @@ import type {
   BackendMeetingResult,
   BackendTicket,
   BackendTranscriptSegment,
+  BackendUrgency,
   BackendVisualAsset,
 } from "./backendTypes";
 import { sanitizeText } from "./sanitize";
 import type { AiInsight, CreativeConcept, KpiInsight, Ticket, TicketPriority, TranscriptLine } from "@/types";
 
-const PRIORITY_MAP: Record<BackendTicket["priority"], TicketPriority> = {
+const PRIORITY_MAP: Record<BackendUrgency, TicketPriority> = {
+  Critical: "critical",
   High: "high",
   Medium: "medium",
   Low: "low",
 };
 
-const CONFIDENCE_BY_PRIORITY: Record<BackendTicket["priority"], number> = {
-  High: 0.95,
-  Medium: 0.85,
-  Low: 0.75,
+const CONFIDENCE_BY_URGENCY: Record<BackendUrgency, number> = {
+  Critical: 0.97,
+  High: 0.9,
+  Medium: 0.8,
+  Low: 0.7,
 };
 
 const CONCEPT_GRADIENTS = [
@@ -56,15 +59,21 @@ export function adaptTicket(ticket: BackendTicket, index: number): Ticket {
     id: ticket.id || `tk-${index}`,
     key: ticket.id,
     summary: sanitizeText(ticket.title),
-    description: sanitizeText(ticket.acceptanceCriteria.join(" ")),
+    description: sanitizeText(ticket.description),
     status: "todo",
-    priority: PRIORITY_MAP[ticket.priority],
+    priority: PRIORITY_MAP[ticket.urgency],
     type: "story",
+    tag: ticket.tag,
     assignee: undefined,
     labels: [ticket.tag.toLowerCase()],
     storyPoints: ticket.storyPoints,
     sprint: "Current Sprint",
     createdAt: "Just now",
+    priorityScore: ticket.priorityScore,
+    complexityScore: ticket.complexityScore,
+    businessImpact: ticket.businessImpact,
+    badge: ticket.badge,
+    dependencies: ticket.dependencies,
   };
 }
 
@@ -91,6 +100,11 @@ export function adaptKpiInsight(insight: BackendDataInsight): KpiInsight {
     // The backend doesn't score insight priority — a downward trend is the
     // one case worth flagging by default; everything else defaults to medium.
     priority: insight.trend === "down" ? "high" : "medium",
+    comparison: sanitizeText(insight.comparison),
+    magnitude: insight.magnitude,
+    // The backend always stamps this post-extraction — null only if an
+    // older payload sneaks through; "ai" is the honest default (never claim "cala").
+    source: insight.source ?? "ai",
   };
 }
 
@@ -111,7 +125,7 @@ export function adaptContextInsightFromTicket(ticket: BackendTicket): AiInsight 
     id: `ctx-${ticket.id}`,
     type: "task",
     text: sanitizeText(ticket.title),
-    confidence: CONFIDENCE_BY_PRIORITY[ticket.priority],
+    confidence: CONFIDENCE_BY_URGENCY[ticket.urgency],
   };
 }
 

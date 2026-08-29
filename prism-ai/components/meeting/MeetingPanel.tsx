@@ -140,7 +140,7 @@ function IdleState({ onStart }: { onStart: () => void }) {
         Start a meeting to generate work
       </h3>
       <p className="text-sm text-gray-500 max-w-md mx-auto mb-6">
-        FlowJira AI listens to your product, engineering, or planning meetings
+        PrismAI listens to your product, engineering, or planning meetings
         and automatically converts conversation into Jira tickets, assignments,
         visual concepts, and KPI insights.
       </p>

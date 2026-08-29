@@ -3,6 +3,8 @@ export type MeetingPhase = "idle" | "listening" | "processing" | "review";
 export type TicketStatus = "todo" | "in_progress" | "blocked" | "done";
 export type TicketPriority = "critical" | "high" | "medium" | "low";
 export type TicketType = "story" | "task" | "bug" | "epic";
+export type TicketTag = "Frontend" | "Backend" | "AI" | "Design" | "Security";
+export type TicketBadge = "Quick Win" | "Strategic Initiative" | "Re-evaluate" | "Balanced";
 
 export interface TeamMember {
   id: string;
@@ -28,11 +30,19 @@ export interface Ticket {
   status: TicketStatus;
   priority: TicketPriority;
   type: TicketType;
+  tag: TicketTag;
   assignee?: TeamMember;
   labels: string[];
   storyPoints?: number;
   sprint?: string;
   createdAt: string;
+  /** Weighted score: businessImpact*0.45 + urgencyWeight*0.35 - complexityScore*0.20 (see backend/services/orchestrator.py). */
+  priorityScore: number;
+  complexityScore: number;
+  businessImpact: number;
+  badge: TicketBadge;
+  /** Ids of other tickets this one is blocked by. */
+  dependencies: string[];
 }
 
 export interface AiInsight {
@@ -53,6 +63,10 @@ export interface CreativeConcept {
   imageUrl?: string;
 }
 
+export type DataStoryMagnitude = "intimate" | "notable" | "big" | "massive";
+export type DataStorySource = "cala" | "ai";
+
+/** A "Data as Art" story card — Cala/AI-derived, rendered on an interactive canvas, not a table. */
 export interface KpiInsight {
   id: string;
   question: string;
@@ -61,6 +75,12 @@ export interface KpiInsight {
   value: string;
   context: string;
   priority: "high" | "medium" | "low";
+  /** Vivid, concrete real-world analogy for `value` (neal.fun-style) — the card's headline. */
+  comparison: string;
+  /** Relative visual scale tier on the storytelling canvas. */
+  magnitude: DataStoryMagnitude;
+  /** "cala" = a real, verified fact/entity Cala recognized. "ai" = the LLM's own narrated estimate. */
+  source: DataStorySource;
 }
 
 export interface SprintItem {

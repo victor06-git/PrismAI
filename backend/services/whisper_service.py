@@ -12,6 +12,15 @@ from services.clients import MissingAPIKeyError, OPENAI_API_KEY, UpstreamService
 
 WHISPER_MODEL = "whisper-1"
 
+# Whisper's `prompt` param doesn't inject facts into the transcript — it
+# biases vocabulary/spelling/style for ambiguous audio (per OpenAI's own
+# docs). A short domain description measurably cuts down on Whisper
+# guessing generic dictionary words over the jargon this app actually hears.
+WHISPER_CONTEXT_PROMPT = (
+    "Software development meeting discussing UI design, backend endpoints, "
+    "agile tickets, and business metrics."
+)
+
 
 @dataclass
 class TranscriptSegment:
@@ -57,6 +66,7 @@ def transcribe_audio(audio_bytes: bytes, filename: str) -> Transcription:
             file=buffer,
             response_format="verbose_json",
             timestamp_granularities=["segment"],
+            prompt=WHISPER_CONTEXT_PROMPT,
         )
     except Exception as exc:
         raise UpstreamServiceError(f"Whisper transcription failed: {exc}") from exc

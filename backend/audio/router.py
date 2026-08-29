@@ -10,28 +10,30 @@ Two ways to run the same speech-to-workflow pipeline:
                                        one consolidated JSON payload. Good
                                        for a plain fetch()-and-await client.
 
-Both share the same underlying steps:
+Both share the same underlying steps (services/orchestrator.py):
   1. Whisper transcribes the uploaded recording (with real per-segment
      timestamps — see services/whisper_service.py).
   2. GPT-4o-mini (Structured Outputs) extracts the backlog / visual prompts /
-     data-insight questions from that transcript in one shot (reuses
-     services/openai_service.py — same contract as the text-transcript flow).
+     data-insight questions from that transcript, then every ticket is
+     scored and sorted by the weighted priority algorithm.
   3. Fal.ai (one call per visual prompt) and Cala (one enrichment call) run
      CONCURRENTLY.
-  4. Every third-party failure degrades gracefully (per-image, per-insight,
-     or — if transcription/extraction itself fails — the whole static
-     mock_data.py fallback), matching the rest of the app's ENABLE_MOCK_FALLBACK
-     convention.
+
+No mocks: a transcription or extraction failure raises a real HTTPException
+(500 = missing key, 502 = upstream failure). A single failed image or a Cala
+call with nothing useful to add degrades gracefully on its own (keeps the
+prompt with no image / keeps the LLM's own guessed insights) without
+touching any canned data — there isn't any.
 
 SSE event types emitted by /transcribe-and-orchestrate, in order:
   status              {"stage": "..."}                              — narration for the UI's loading state
   transcript          {"transcript": "...", "segments": [...]}       — once Whisper finishes
-  extracted           {summary, tickets, visualAssets, dataInsights}  — once GPT structured output finishes (images still null)
+  extracted           {summary, tickets, visualAssets, dataInsights}  — once GPT structured output + scoring finishes (images still null)
   visual_asset_ready  {"index": i, "imageUrl": "..."}                 — one per successful Fal.ai generation, as it completes
   visual_asset_failed {"index": i, "message": "..."}                   — one per failed Fal.ai generation (that card just keeps its prompt, no image)
   insights_enriched   {"dataInsights": [...]}                          — once the Cala call resolves (real data, or the LLM's own guess kept as a fallback)
   done                <full ProcessMeetingResponse, images included>    — final consolidated snapshot
-  error               {"stage": "...", "message": "..."}               — unrecoverable failure (only when ENABLE_MOCK_FALLBACK is off)
+  error               {"stage": "...", "message": "..."}               — unrecoverable failure (transcription/extraction only)
 """
 
 import asyncio
@@ -43,14 +45,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from database import save_asset, save_context, save_meeting
-from mock_data import MOCK_PROCESS_MEETING_RESPONSE
 from rate_limit import limiter
-from schemas import AudioProcessResponse, ProcessMeetingResponse, VisualAssetPrompt
+from schemas import AudioProcessResponse, ProcessMeetingResponse
 from schemas import TranscriptSegment as TranscriptSegmentSchema
 from services.cala_service import fetch_data_insights_typed
-from services.clients import ENABLE_MOCK_FALLBACK, MissingAPIKeyError, UpstreamServiceError, logger
+from services.clients import MissingAPIKeyError, UpstreamServiceError, logger
 from services.fal_service import generate_visual_asset
-from services.openai_service import generate_meeting_outputs
+from services.orchestrator import enrich_with_cala, extract_and_score, generate_all_moodboard_images
 from services.whisper_service import Transcription, TranscriptSegment, transcribe_audio
 
 router = APIRouter(prefix="/api/audio", tags=["audio"])
@@ -106,15 +107,6 @@ async def transcribe_and_orchestrate(request: Request, audio: UploadFile = File(
     )
 
 
-async def _fallback_stream(reason: str) -> AsyncIterator[str]:
-    """Demo-safety net: same static mock_data.py used by the text-transcript flow."""
-    logger.warning("audio-orchestrate: falling back to mock data (%s)", reason)
-    yield _sse("status", {"stage": "using_fallback_data", "reason": reason})
-    mock = ProcessMeetingResponse(**MOCK_PROCESS_MEETING_RESPONSE)
-    yield _sse("extracted", _dump_response(mock))
-    yield _sse("done", _dump_response(mock))
-
-
 async def _run_pipeline(audio_bytes: bytes, filename: str) -> AsyncIterator[str]:
     # --- 1. Transcribe -----------------------------------------------------
     yield _sse("status", {"stage": "transcribing"})
@@ -122,19 +114,11 @@ async def _run_pipeline(audio_bytes: bytes, filename: str) -> AsyncIterator[str]
         transcription = await asyncio.to_thread(transcribe_audio, audio_bytes, filename)
     except (MissingAPIKeyError, UpstreamServiceError) as exc:
         logger.error("audio-orchestrate: transcription failed: %s", exc)
-        if ENABLE_MOCK_FALLBACK:
-            async for chunk in _fallback_stream(f"transcription failed: {exc}"):
-                yield chunk
-        else:
-            yield _sse("error", {"stage": "transcribe", "message": str(exc)})
+        yield _sse("error", {"stage": "transcribe", "message": str(exc)})
         return
-    except Exception as exc:  # unexpected / programmer error — still never crash the demo
+    except Exception as exc:  # unexpected / programmer error
         logger.error("audio-orchestrate: unexpected transcription error: %s", exc)
-        if ENABLE_MOCK_FALLBACK:
-            async for chunk in _fallback_stream(f"unexpected transcription error: {exc}"):
-                yield chunk
-        else:
-            yield _sse("error", {"stage": "transcribe", "message": str(exc)})
+        yield _sse("error", {"stage": "transcribe", "message": str(exc)})
         return
 
     transcript = transcription.text
@@ -144,25 +128,17 @@ async def _run_pipeline(audio_bytes: bytes, filename: str) -> AsyncIterator[str]
 
     yield _sse("transcript", {"transcript": transcript, "segments": _dump_segments(transcription.segments)})
 
-    # --- 2. Structured extraction (backlog + visual prompts + insight Qs) --
+    # --- 2. Structured extraction + priority scoring -----------------------
     yield _sse("status", {"stage": "analyzing"})
     try:
-        extracted = await asyncio.to_thread(generate_meeting_outputs, transcript)
+        extracted = await asyncio.to_thread(extract_and_score, transcript)
     except (MissingAPIKeyError, UpstreamServiceError) as exc:
         logger.error("audio-orchestrate: extraction failed: %s", exc)
-        if ENABLE_MOCK_FALLBACK:
-            async for chunk in _fallback_stream(f"extraction failed: {exc}"):
-                yield chunk
-        else:
-            yield _sse("error", {"stage": "analyze", "message": str(exc)})
+        yield _sse("error", {"stage": "analyze", "message": str(exc)})
         return
     except Exception as exc:
         logger.error("audio-orchestrate: unexpected extraction error: %s", exc)
-        if ENABLE_MOCK_FALLBACK:
-            async for chunk in _fallback_stream(f"unexpected extraction error: {exc}"):
-                yield chunk
-        else:
-            yield _sse("error", {"stage": "analyze", "message": str(exc)})
+        yield _sse("error", {"stage": "analyze", "message": str(exc)})
         return
 
     yield _sse("extracted", _dump_response(extracted))
@@ -202,7 +178,10 @@ async def _run_pipeline(audio_bytes: bytes, filename: str) -> AsyncIterator[str]
                 yield _sse("visual_asset_failed", {"index": index, "message": error})
         else:  # kind == "insights"
             if payload:
-                data_insights = payload
+                # Merge, don't replace — Cala's real entity facts (source="cala")
+                # sit alongside the LLM's own narrated estimates (source="ai")
+                # on the "Data as Art" canvas, instead of one discarding the other.
+                data_insights = [*data_insights, *payload]
                 logger.info("audio-orchestrate: insights enriched via Cala.")
             else:
                 logger.warning("audio-orchestrate: Cala enrichment failed, keeping LLM-derived insights: %s", error)
@@ -223,44 +202,6 @@ async def _run_pipeline(audio_bytes: bytes, filename: str) -> AsyncIterator[str]
 # ---------------------------------------------------------------------------
 
 
-def _mock_process_response(meeting_id: str, transcript: str, segments: list[TranscriptSegment]) -> AudioProcessResponse:
-    logger.warning("audio-process: falling back to mock data for meeting %s.", meeting_id)
-    mock = ProcessMeetingResponse(**MOCK_PROCESS_MEETING_RESPONSE)
-    return AudioProcessResponse(
-        meetingId=meeting_id,
-        transcript=transcript or mock.summary,
-        segments=[TranscriptSegmentSchema(**vars(s)) for s in segments],
-        summary=mock.summary,
-        tickets=mock.tickets,
-        visualAssets=mock.visualAssets,
-        dataInsights=mock.dataInsights,
-    )
-
-
-async def _generate_all_images(visual_assets: list[VisualAssetPrompt]) -> list[VisualAssetPrompt]:
-    """One Fal.ai call per prompt, run concurrently. A single failure just leaves that
-    asset without an image (still usable — the UI can offer a manual retry)."""
-
-    async def _one(asset: VisualAssetPrompt) -> VisualAssetPrompt:
-        try:
-            url = await asyncio.to_thread(generate_visual_asset, asset.falPrompt)
-            return asset.model_copy(update={"imageUrl": url})
-        except Exception as exc:
-            logger.warning("audio-process: image generation failed for %r: %s", asset.assetName, exc)
-            return asset
-
-    return list(await asyncio.gather(*(_one(asset) for asset in visual_assets)))
-
-
-async def _enrich_insights(transcript: str, fallback_insights: list) -> list:
-    """One Cala call. Falls back to the LLM's own guessed insights if it fails."""
-    try:
-        return await asyncio.to_thread(fetch_data_insights_typed, transcript)
-    except Exception as exc:
-        logger.warning("audio-process: Cala enrichment failed, keeping LLM-derived insights: %s", exc)
-        return fallback_insights
-
-
 @router.post("/transcribe-and-process", response_model=AudioProcessResponse)
 @limiter.limit("10/minute")
 async def transcribe_and_process(
@@ -270,9 +211,9 @@ async def transcribe_and_process(
 ) -> AudioProcessResponse:
     """
     Single-shot counterpart to /transcribe-and-orchestrate: the same pipeline
-    (Whisper -> structured extraction -> concurrent Fal.ai + Cala, via
-    asyncio.gather), but awaited end-to-end and returned as one consolidated
-    JSON payload — no SSE parsing required on the client.
+    (Whisper -> structured extraction + scoring -> concurrent Fal.ai + Cala,
+    via asyncio.gather), but awaited end-to-end and returned as one
+    consolidated JSON payload — no SSE parsing required on the client.
     """
     raw = await audio.read()
     _read_and_validate_upload_sync(raw)
@@ -284,40 +225,25 @@ async def transcribe_and_process(
         transcription: Transcription = await asyncio.to_thread(transcribe_audio, raw, filename)
     except (MissingAPIKeyError, UpstreamServiceError) as exc:
         logger.error("audio-process: transcription failed: %s", exc)
-        if not ENABLE_MOCK_FALLBACK:
-            status = 500 if isinstance(exc, MissingAPIKeyError) else 502
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
-        return _mock_process_response(meeting_id, "", [])
-    except Exception as exc:
-        logger.error("audio-process: unexpected transcription error: %s", exc)
-        if not ENABLE_MOCK_FALLBACK:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return _mock_process_response(meeting_id, "", [])
+        status = 500 if isinstance(exc, MissingAPIKeyError) else 502
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
 
     if not transcription.text:
         raise HTTPException(status_code=422, detail="No speech detected in the recording.")
 
     save_meeting(meeting_id, transcription.text)
 
-    # --- 2. Structured extraction ----------------------------------------
+    # --- 2. Structured extraction + scoring, then Fal.ai + Cala concurrently
     try:
-        extracted = await asyncio.to_thread(generate_meeting_outputs, transcription.text)
+        extracted = await asyncio.to_thread(extract_and_score, transcription.text)
     except (MissingAPIKeyError, UpstreamServiceError) as exc:
         logger.error("audio-process: extraction failed: %s", exc)
-        if not ENABLE_MOCK_FALLBACK:
-            status = 500 if isinstance(exc, MissingAPIKeyError) else 502
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
-        return _mock_process_response(meeting_id, transcription.text, transcription.segments)
-    except Exception as exc:
-        logger.error("audio-process: unexpected extraction error: %s", exc)
-        if not ENABLE_MOCK_FALLBACK:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return _mock_process_response(meeting_id, transcription.text, transcription.segments)
+        status = 500 if isinstance(exc, MissingAPIKeyError) else 502
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
 
-    # --- 3. Concurrently: Fal.ai (one call per prompt) + Cala enrichment ---
     visual_assets, data_insights = await asyncio.gather(
-        _generate_all_images(extracted.visualAssets),
-        _enrich_insights(transcription.text, extracted.dataInsights),
+        generate_all_moodboard_images(extracted.visualAssets),
+        enrich_with_cala(transcription.text, extracted.dataInsights),
     )
 
     for asset in visual_assets:

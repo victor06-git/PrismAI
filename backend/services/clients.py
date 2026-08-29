@@ -29,14 +29,12 @@ class UpstreamServiceError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Demo-resilience feature flag
+# No mock fallback, by design.
 # ---------------------------------------------------------------------------
-# When true (default) a failed upstream call is logged and silently replaced
-# with static mock data (mock_data.py) instead of surfacing an error to the
-# caller — so a live demo never shows a broken screen. Set
-# ENABLE_MOCK_FALLBACK=false to get real HTTPException(500/502) responses
-# instead (useful to verify error handling, or outside of a demo context).
-ENABLE_MOCK_FALLBACK = os.getenv("ENABLE_MOCK_FALLBACK", "true").strip().lower() != "false"
+# Every endpoint calls the real OpenAI/Fal.ai/Cala APIs and surfaces a real
+# HTTPException (500 for a missing key, 502 for an upstream failure) if a
+# call fails — there is no static/canned data anywhere in this backend.
+# Set your keys in .env (see .env.example) before running a live demo.
 
 # ---------------------------------------------------------------------------
 # OpenAI
@@ -46,8 +44,8 @@ OPENAI_MODEL = "gpt-4o-mini"
 
 if not OPENAI_API_KEY:
     logger.warning(
-        "OPENAI_API_KEY is not set — /api/process-meeting will use fallback behavior. "
-        "Copy .env.example to .env and set your key to enable live generation."
+        "OPENAI_API_KEY is not set — every endpoint that calls OpenAI will fail with a 500 "
+        "until you set it. Copy .env.example to .env and set your key."
     )
 
 # A placeholder key lets the client construct even when unset, so the service
@@ -58,33 +56,37 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY or "sk-not-configured")
 # ---------------------------------------------------------------------------
 # Fal.ai
 # ---------------------------------------------------------------------------
-FAL_KEY = os.getenv("FAL_KEY")
+# fal_client's module-level functions (fal_client.subscribe, etc.) read
+# FAL_KEY directly from os.environ on every call — there's no client object
+# to construct, but the env var must be named exactly "FAL_KEY" for the
+# library itself to find it. FAL_API is accepted as a fallback alias (some
+# .env files in this project have used that name), but gets re-exported
+# under "FAL_KEY" so fal_client actually picks it up.
+FAL_KEY = os.getenv("FAL_KEY") or os.getenv("FAL_API")
 FAL_MODEL = "fal-ai/flux/schnell"
+
+if FAL_KEY and not os.getenv("FAL_KEY"):
+    os.environ["FAL_KEY"] = FAL_KEY
+    logger.info("Using FAL_API as a fallback for FAL_KEY — fal_client needs the FAL_KEY name specifically.")
 
 if not FAL_KEY:
     logger.warning(
-        "FAL_KEY is not set — /api/generate-asset will use fallback behavior. "
-        "Copy .env.example to .env and set your key to enable live generation."
+        "Neither FAL_KEY nor FAL_API is set — every endpoint that calls Fal.ai will fail with a 500 "
+        "until you set one. Copy .env.example to .env and set your key."
     )
-# fal_client's module-level functions (fal_client.subscribe, etc.) read
-# FAL_KEY from the environment automatically on every call — there is no
-# client object to construct, it just needs the env var loaded, which
-# load_dotenv() above already guarantees.
 
 # ---------------------------------------------------------------------------
 # Cala ("Skip the Data" analytics)
 # ---------------------------------------------------------------------------
 CALA_API_KEY = os.getenv("CALA_API_KEY")
-# NOTE: Cala's public REST contract/base URL wasn't provided for this hackathon
-# build. CALA_API_BASE_URL is overridable via .env; point it at the real
-# endpoint once you have it. Until then this call will fail fast and
-# transparently fall back to mock insights (see services/cala_service.py).
-CALA_API_BASE_URL = os.getenv("CALA_API_BASE_URL", "https://api.cala.example.com/v1")
+CALA_API_BASE_URL = os.getenv("CALA_API_BASE_URL", "https://api.cala.ai/v1")
 
-CALA_API_BASE_URL = os.getenv(
-    "CALA_API_BASE_URL",
-    "https://api.cala.ai/v1"
-)
+if not CALA_API_KEY:
+    logger.warning(
+        "CALA_API_KEY is not set — every endpoint that calls Cala will fail with a 500 "
+        "until you set it. Copy .env.example to .env and set your key."
+    )
+
 
 def call_cala_api(
     path: str,

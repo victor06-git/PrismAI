@@ -2,18 +2,30 @@
 
 /**
  * Drives the WebSocket /ws/live progressive pipeline: real microphone level
- * (AudioContext + AnalyserNode) for the waveform bar, plus a segment-restart
- * MediaRecorder loop that streams ~4s audio files to the backend and
- * forwards every typed event it sends back (TRANSCRIPT_UPDATE, NEW_TICKET,
- * MOODBOARD_IMAGE, CALA_METRIC, STATUS, ERROR) to the caller.
+ * (AudioContext + AnalyserNode) for the waveform bar, plus a continuous
+ * raw-PCM capture (AudioWorklet) that cuts and streams WAV segments to the
+ * backend and forwards every typed event it sends back (TRANSCRIPT_UPDATE,
+ * NEW_TICKET, MOODBOARD_IMAGE, CALA_METRIC, STATUS, ERROR) to the caller.
  *
- * Chunking trade-off (see backend/audio/live_session.py for the full
- * rationale): each segment is produced by stopping and immediately
- * restarting MediaRecorder on the same stream, because only the *first*
- * chunk of a `timeslice`-based recording is an independently-decodable
- * file — later ones aren't. That keeps every segment transcribable, at the
- * honest cost that a word spoken exactly across a ~4s boundary can be
- * split. Eliminating that entirely needs OpenAI's separate Realtime API.
+ * Chunking approach (see backend/audio/live_session.py for the server-side
+ * half of this): earlier versions stopped/restarted a MediaRecorder every
+ * ~4s, which reliably split words sitting across that boundary — the
+ * restart has to fully re-init a new encoder, so there's no way to hand it
+ * a lead-in. Capturing raw PCM directly via an AudioWorklet instead means
+ * there's a continuous, gapless sample stream to cut from, which enables
+ * two real fixes:
+ *   1. Lightweight VAD: a segment only cuts on a detected silence gap (or a
+ *      hard duration cap, whichever comes first) — cuts land between words
+ *      whenever there's a natural pause to land in, instead of at an
+ *      arbitrary fixed tick.
+ *   2. Overlap: every new segment carries a short lead-in of trailing audio
+ *      from the previous one, so even a hard-cap cut mid-word still leaves
+ *      that word intact in at least one of the two segments. The backend
+ *      trims the resulting duplicate words back out before they reach the
+ *      transcript (see live_session.py's _dedupe_segment_overlap).
+ * Getting boundary loss to *zero* still needs OpenAI's separate Realtime
+ * API (a materially different integration) — this hook doesn't claim that,
+ * only to make it the rare/partial exception instead of the norm.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,17 +45,69 @@ export interface UseLiveAudioStreamResult {
   reset: () => void;
 }
 
-const SEGMENT_DURATION_MS = 4000;
-const PREFERRED_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
-
-function pickMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined") return undefined;
-  return PREFERRED_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
-}
+// --- Segment-cutting tuning -------------------------------------------------
+const TARGET_SEGMENT_MS = 4000; // preferred segment length once a silence gap is available to cut at
+const MAX_SEGMENT_MS = 7000; // hard cap so a long uninterrupted monologue still gets cut somewhere
+const MIN_SEGMENT_MS = 1500; // never cut a segment shorter than this (avoids a flurry of tiny segments)
+const SILENCE_GAP_MS = 250; // how much continuous quiet counts as "a pause to cut at"
+const OVERLAP_MS = 400; // trailing audio carried into the next segment, so a hard-cap cut can't fully lose a word
+const SILENCE_RMS_THRESHOLD = 0.015; // raw [-1,1] PCM RMS below this counts as silence (typical mic noise floor is well under this; speech is well over it)
+const MIN_FLUSH_MS = 300; // don't bother sending a pause/stop-triggered segment shorter than this — not enough audio to transcribe meaningfully
 
 function deriveWsUrl(): string {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
   return base.replace(/^http/, "ws") + "/ws/live";
+}
+
+function computeRms(samples: Float32Array): number {
+  let sumSquares = 0;
+  for (const sample of samples) sumSquares += sample * sample;
+  return Math.sqrt(sumSquares / samples.length);
+}
+
+function flattenChunks(chunks: Float32Array[], totalLength: number): Float32Array {
+  const out = new Float32Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+/** Encodes mono Float32 PCM as a standard 16-bit PCM WAV file — self-contained
+ * regardless of where it's cut from, unlike a MediaRecorder container chunk. */
+function encodeWavPCM16(samples: Float32Array, sampleRate: number): Blob {
+  const bytesPerSample = 2;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true); // byte rate
+  view.setUint16(32, bytesPerSample, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
 }
 
 export function useLiveAudioStream(
@@ -59,13 +123,19 @@ export function useLiveAudioStream(
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const levelFrameRef = useRef<number | null>(null);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const segmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mimeTypeRef = useRef<string>("audio/webm");
   const pausedRef = useRef(false);
   const stoppedRef = useRef(true);
+
+  // Raw-PCM segment buffer — plain refs, never React state, since these are
+  // rewritten many times a second and must never trigger a render.
+  const pcmChunksRef = useRef<Float32Array[]>([]);
+  const totalSamplesRef = useRef(0);
+  const silentSamplesRef = useRef(0);
+  const capturingRef = useRef(false);
+  const sampleRateRef = useRef(0);
 
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
@@ -79,15 +149,10 @@ export function useLiveAudioStream(
     levelFrameRef.current = null;
   }, []);
 
-  const startLevelMonitor = useCallback((stream: MediaStream) => {
-    const AudioContextCtor =
-      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const audioContext = new AudioContextCtor();
-    const source = audioContext.createMediaStreamSource(stream);
+  const startLevelMonitor = useCallback((audioContext: AudioContext, source: MediaStreamAudioSourceNode) => {
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
-    audioContextRef.current = audioContext;
     analyserRef.current = analyser;
 
     const data = new Uint8Array(analyser.frequencyBinCount);
@@ -106,19 +171,11 @@ export function useLiveAudioStream(
     tick();
   }, []);
 
-  const cleanupMedia = useCallback(() => {
-    stopLevelMonitor();
-    if (elapsedTimerRef.current !== null) clearInterval(elapsedTimerRef.current);
-    if (segmentTimerRef.current !== null) clearTimeout(segmentTimerRef.current);
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    void audioContextRef.current?.close().catch(() => {});
-    elapsedTimerRef.current = null;
-    segmentTimerRef.current = null;
-    streamRef.current = null;
-    audioContextRef.current = null;
-    analyserRef.current = null;
-    mediaRecorderRef.current = null;
-  }, [stopLevelMonitor]);
+  const resetSegmentBuffer = useCallback(() => {
+    pcmChunksRef.current = [];
+    totalSamplesRef.current = 0;
+    silentSamplesRef.current = 0;
+  }, []);
 
   const sendSegment = useCallback((blob: Blob) => {
     if (blob.size === 0 || wsRef.current?.readyState !== WebSocket.OPEN) return;
@@ -127,42 +184,77 @@ export function useLiveAudioStream(
     });
   }, []);
 
-  // Indirection so the recursive "start the next segment" call inside
-  // onstop always reaches the latest closure via a stable ref, instead of
-  // startSegmentLoop referencing itself directly (which the React Compiler
-  // flags — a self-referencing useCallback can't safely memoize).
-  const startSegmentLoopRef = useRef<() => void>(() => {});
+  // Cuts whatever is currently buffered into one WAV segment and sends it.
+  // `carryOverlap`: true for a normal in-flow cut (keeps the trailing
+  // OVERLAP_MS as the start of the next segment); false for a pause/stop
+  // flush (nothing follows immediately, so there's nothing to carry into).
+  const cutSegment = useCallback(
+    (carryOverlap: boolean, minMs: number) => {
+      const sampleRate = sampleRateRef.current;
+      const totalSamples = totalSamplesRef.current;
+      if (!sampleRate || totalSamples === 0) return;
+      if ((totalSamples / sampleRate) * 1000 < minMs) return;
 
-  const startSegmentLoop = useCallback(() => {
-    if (pausedRef.current || stoppedRef.current || !streamRef.current) return;
+      const flat = flattenChunks(pcmChunksRef.current, totalSamples);
+      sendSegment(encodeWavPCM16(flat, sampleRate));
 
-    const mimeType = pickMimeType();
-    mimeTypeRef.current = mimeType ?? "audio/webm";
-    const recorder = mimeType
-      ? new MediaRecorder(streamRef.current, { mimeType })
-      : new MediaRecorder(streamRef.current);
-    const chunks: Blob[] = [];
-
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onstop = () => {
-      sendSegment(new Blob(chunks, { type: mimeTypeRef.current }));
-      if (!pausedRef.current && !stoppedRef.current) {
-        startSegmentLoopRef.current(); // gapless-as-possible: start the next segment right away
+      if (carryOverlap) {
+        const overlapSamples = Math.min(flat.length, Math.round((OVERLAP_MS / 1000) * sampleRate));
+        const tail = flat.slice(flat.length - overlapSamples);
+        pcmChunksRef.current = [tail];
+        totalSamplesRef.current = tail.length;
+      } else {
+        pcmChunksRef.current = [];
+        totalSamplesRef.current = 0;
       }
-    };
+      silentSamplesRef.current = 0;
+    },
+    [sendSegment]
+  );
 
-    mediaRecorderRef.current = recorder;
-    recorder.start();
-    segmentTimerRef.current = setTimeout(() => {
-      if (recorder.state !== "inactive") recorder.stop();
-    }, SEGMENT_DURATION_MS);
-  }, [sendSegment]);
+  const handleWorkletMessage = useCallback(
+    (event: MessageEvent<Float32Array>) => {
+      if (!capturingRef.current) return;
+      const chunk = event.data;
+      pcmChunksRef.current.push(chunk);
+      totalSamplesRef.current += chunk.length;
+      silentSamplesRef.current = computeRms(chunk) < SILENCE_RMS_THRESHOLD ? silentSamplesRef.current + chunk.length : 0;
 
-  useEffect(() => {
-    startSegmentLoopRef.current = startSegmentLoop;
-  }, [startSegmentLoop]);
+      const sampleRate = sampleRateRef.current;
+      if (!sampleRate) return;
+      const totalMs = (totalSamplesRef.current / sampleRate) * 1000;
+      if (totalMs < MIN_SEGMENT_MS) return;
+
+      const reachedMax = totalMs >= MAX_SEGMENT_MS;
+      const reachedTargetInSilence =
+        totalMs >= TARGET_SEGMENT_MS && (silentSamplesRef.current / sampleRate) * 1000 >= SILENCE_GAP_MS;
+
+      if (reachedMax || reachedTargetInSilence) {
+        cutSegment(true, 0);
+      }
+    },
+    [cutSegment]
+  );
+
+  const cleanupMedia = useCallback(() => {
+    stopLevelMonitor();
+    if (elapsedTimerRef.current !== null) clearInterval(elapsedTimerRef.current);
+    elapsedTimerRef.current = null;
+    capturingRef.current = false;
+    resetSegmentBuffer();
+    if (workletNodeRef.current) {
+      workletNodeRef.current.port.onmessage = null;
+      workletNodeRef.current.disconnect();
+    }
+    workletNodeRef.current = null;
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    void audioContextRef.current?.close().catch(() => {});
+    audioContextRef.current = null;
+    sampleRateRef.current = 0;
+  }, [stopLevelMonitor, resetSegmentBuffer]);
 
   const start = useCallback(
     async (meetingId?: string) => {
@@ -170,6 +262,16 @@ export function useLiveAudioStream(
       setStatus("connecting");
       stoppedRef.current = false;
       pausedRef.current = false;
+
+      const AudioContextCtor =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor || !AudioContextCtor.prototype.audioWorklet) {
+        const message = "This browser doesn't support the Web Audio Worklet API needed for live capture.";
+        setStatus("error");
+        setError(message);
+        onErrorRef.current?.(message);
+        return;
+      }
 
       let stream: MediaStream;
       try {
@@ -183,7 +285,36 @@ export function useLiveAudioStream(
       }
 
       streamRef.current = stream;
-      startLevelMonitor(stream);
+
+      const audioContext = new AudioContextCtor();
+      audioContextRef.current = audioContext;
+      sampleRateRef.current = audioContext.sampleRate;
+      const source = audioContext.createMediaStreamSource(stream);
+
+      startLevelMonitor(audioContext, source);
+
+      try {
+        await audioContext.audioWorklet.addModule("/audio-capture-worklet.js");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not load the audio capture worklet.";
+        setStatus("error");
+        setError(message);
+        onErrorRef.current?.(message);
+        cleanupMedia();
+        return;
+      }
+
+      const workletNode = new AudioWorkletNode(audioContext, "capture-processor");
+      workletNode.port.onmessage = handleWorkletMessage;
+      source.connect(workletNode);
+      // The worklet never writes to its outputs (it only reports samples back
+      // over the port), so without a path toward destination some engines
+      // may stop pulling it for lack of downstream consumers. A muted gain
+      // keeps it in the active graph without anything audible looping back.
+      const silentSink = audioContext.createGain();
+      silentSink.gain.value = 0;
+      workletNode.connect(silentSink).connect(audioContext.destination);
+      workletNodeRef.current = workletNode;
 
       const ws = new WebSocket(deriveWsUrl());
       wsRef.current = ws;
@@ -203,7 +334,8 @@ export function useLiveAudioStream(
           setStatus("streaming");
           setElapsedSeconds(0);
           elapsedTimerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
-          startSegmentLoop();
+          resetSegmentBuffer();
+          capturingRef.current = true;
         }
         onEventRef.current(parsed);
       };
@@ -223,15 +355,13 @@ export function useLiveAudioStream(
         }
       };
     },
-    [startLevelMonitor, startSegmentLoop, cleanupMedia]
+    [startLevelMonitor, handleWorkletMessage, resetSegmentBuffer, cleanupMedia]
   );
 
   const stop = useCallback(() => {
     stoppedRef.current = true;
-    if (segmentTimerRef.current !== null) clearTimeout(segmentTimerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
+    capturingRef.current = false;
+    cutSegment(false, MIN_FLUSH_MS); // flush whatever's left — nothing follows, so no overlap to carry
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "stop" }));
     }
@@ -239,23 +369,22 @@ export function useLiveAudioStream(
     setTimeout(() => ws?.close(), 400); // give the stop message + last segment a moment to flush
     cleanupMedia();
     setStatus("stopped");
-  }, [cleanupMedia]);
+  }, [cutSegment, cleanupMedia]);
 
   const togglePause = useCallback(() => {
     if (stoppedRef.current) return;
     if (pausedRef.current) {
       pausedRef.current = false;
       setStatus("streaming");
-      startSegmentLoop();
+      resetSegmentBuffer();
+      capturingRef.current = true;
     } else {
       pausedRef.current = true;
       setStatus("paused");
-      if (segmentTimerRef.current !== null) clearTimeout(segmentTimerRef.current);
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop(); // flushes the in-progress segment; onstop won't restart while paused
-      }
+      capturingRef.current = false;
+      cutSegment(false, MIN_FLUSH_MS); // flush the in-progress segment; nothing follows immediately while paused
     }
-  }, [startSegmentLoop]);
+  }, [cutSegment, resetSegmentBuffer]);
 
   const reset = useCallback(() => {
     stoppedRef.current = true;

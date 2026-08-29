@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { teamMembers } from "@/data/mockData";
+import { teamMembers } from "@/data/appConfig";
 import type {
   AiInsight,
   CreativeConcept,

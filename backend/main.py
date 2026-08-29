@@ -2,7 +2,9 @@
 PrismAI backend — FastAPI service.
 
 Turns a raw meeting transcript into three simultaneous outputs:
-  1. A Scrum/Jira-style software backlog (OpenAI, Structured Outputs).
+  1. An intelligently-prioritized Scrum/Jira-style backlog (OpenAI Structured
+     Outputs + a deterministic weighted priority-scoring algorithm — see
+     services/orchestrator.py).
   2. Moodboard / visual creative prompts, rendered as images via Fal.ai Flux Schnell.
   3. Cala-style ("Skip the Data") analytics insights.
 
@@ -17,11 +19,16 @@ Also exposes:
     /ws/live): ~4s audio segments transcribed and appended as they arrive,
     with tickets/moodboards/insights streamed in as the conversation grows.
 
-This module is intentionally a thin routing/orchestration layer: all external
-API calls live in services/ (openai_service.py, fal_service.py,
-cala_service.py, whisper_service.py), built on shared client setup + custom
-exceptions in services/clients.py. Auth and audio each have their own
-self-contained package (auth/, audio/).
+No mocks anywhere. Every endpoint calls the real OpenAI/Fal.ai/Cala/Whisper
+APIs; a failure raises a real HTTPException (500 = misconfigured on our end,
+502 = the upstream call itself failed) instead of silently substituting
+canned data.
+
+This module is intentionally a thin routing layer: all external API calls
+and the priority algorithm live in services/ (openai_service.py,
+fal_service.py, cala_service.py, whisper_service.py, orchestrator.py), built
+on shared client setup + custom exceptions in services/clients.py. Auth and
+audio each have their own self-contained package (auth/, audio/).
 
 Security notes:
   - CORS origins come from ALLOWED_ORIGINS (comma-separated) if set, else
@@ -40,7 +47,7 @@ Run locally with:
 
 import json
 import os
-from typing import Callable
+from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,20 +59,8 @@ from starlette.concurrency import run_in_threadpool
 from audio.live_session import websocket_live_session
 from audio.router import router as audio_router
 from auth.router import router as auth_router
-from mock_data import (
-    MOCK_DATA_INSIGHTS_RESPONSE,
-    MOCK_GENERATE_ASSET_RESPONSE,
-    MOCK_PROCESS_MEETING_RESPONSE,
-)
-from database import (
-    init_db,
-    save_asset,
-    save_meeting,
-    get_meeting,
-    save_context,
-)
+from database import get_meeting, init_db, save_asset, save_context, save_meeting
 from rate_limit import limiter
-
 from schemas import (
     DataInsightsRequest,
     DataInsightsResponse,
@@ -78,7 +73,6 @@ from schemas import (
 from services.cala_service import fetch_data_insights
 from services.clients import (
     CALA_API_KEY,
-    ENABLE_MOCK_FALLBACK,
     FAL_KEY,
     OPENAI_API_KEY,
     MissingAPIKeyError,
@@ -86,12 +80,12 @@ from services.clients import (
     logger,
 )
 from services.fal_service import generate_visual_asset
-from services.openai_service import generate_meeting_outputs
+from services.orchestrator import run_full_orchestration
 
 app = FastAPI(
     title="PrismAI API",
-    description="Real-time meeting copilot: backlog, moodboards & data insights.",
-    version="0.5.0",
+    description="Real-time meeting copilot: intelligently-prioritized backlog, moodboards & data insights.",
+    version="0.6.0",
 )
 
 init_db()
@@ -127,36 +121,13 @@ async def ws_live(websocket: WebSocket) -> None:
     await websocket_live_session(websocket)
 
 
-# ---------------------------------------------------------------------------
-# Shared error-handling helper
-# ---------------------------------------------------------------------------
-
-
-def _resolve_with_fallback(
-    route: str, exc: Exception, status_code: int, build_fallback: Callable[[], object]
-) -> object:
-    """
-    Single failure path shared by every external-API route:
-      - always logs the real error (clear, upstream-attributable message),
-      - returns mock data (HTTP 200) when ENABLE_MOCK_FALLBACK is on, so a
-        live demo never shows a broken screen,
-      - otherwise — or if the fallback itself is broken — raises a proper
-        HTTPException(status_code) so the failure is visible to the caller.
-    """
+def _raise_for(route: str, exc: Exception, upstream_status: int = 502) -> NoReturn:
+    """Every endpoint's uniform failure path: log clearly, then raise a real
+    HTTPException — 500 if it's our own misconfiguration (missing key), the
+    given upstream_status (default 502) if the third-party call itself failed."""
     logger.error("%s: %s failed: %s", route, type(exc).__name__, exc)
-
-    if not ENABLE_MOCK_FALLBACK:
-        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-
-    try:
-        logger.warning("%s: falling back to mock data.", route)
-        return build_fallback()
-    except Exception as fallback_exc:
-        logger.error("%s: fallback data itself is invalid: %s", route, fallback_exc)
-        raise HTTPException(
-            status_code=500,
-            detail=f"{route} failed and fallback data is unavailable: {fallback_exc}",
-        ) from fallback_exc
+    status_code = 500 if isinstance(exc, MissingAPIKeyError) else upstream_status
+    raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +143,6 @@ async def health_check() -> dict:
         "openaiConfigured": bool(OPENAI_API_KEY),
         "falConfigured": bool(FAL_KEY),
         "calaConfigured": bool(CALA_API_KEY),
-        "mockFallbackEnabled": ENABLE_MOCK_FALLBACK,
     }
 
 
@@ -180,47 +150,33 @@ async def health_check() -> dict:
 @limiter.limit("15/minute")
 async def process_meeting(request: Request, payload: ProcessMeetingRequest) -> ProcessMeetingResponse:
     """
-    Analyze a meeting transcript with OpenAI Structured Outputs (gpt-4o-mini)
-    and return the backlog + visual asset prompts + data insights at once.
+    Full pipeline on a pasted transcript: OpenAI Structured Outputs + priority
+    scoring, then real Fal.ai images and Cala enrichment concurrently.
     """
     if not payload.transcript.strip():
         raise HTTPException(status_code=422, detail="transcript must not be empty.")
 
-    def fallback() -> ProcessMeetingResponse:
-        return ProcessMeetingResponse(**MOCK_PROCESS_MEETING_RESPONSE)
-
     try:
-        return await run_in_threadpool(generate_meeting_outputs, payload.transcript)
-    except MissingAPIKeyError as exc:
-        return _resolve_with_fallback("process-meeting", exc, 500, fallback)
-    except UpstreamServiceError as exc:
-        return _resolve_with_fallback("process-meeting", exc, 502, fallback)
-    except Exception as exc:  # unexpected / programmer error — still never crash the demo
-        return _resolve_with_fallback("process-meeting", exc, 500, fallback)
+        return await run_full_orchestration(payload.transcript)
+    except (MissingAPIKeyError, UpstreamServiceError) as exc:
+        _raise_for("process-meeting", exc)
 
 
 @app.post("/api/process-text", response_model=ProcessMeetingResponse)
 @limiter.limit("15/minute")
 async def process_text(request: Request, payload: ProcessTextRequest) -> ProcessMeetingResponse:
     """
-    Fallback / quick-testing endpoint: identical extraction to
-    /api/process-meeting, accepting raw text directly — handy for exercising
-    the OpenAI -> Fal.ai/Cala pipeline downstream without a microphone.
+    Quick-testing endpoint: identical full pipeline to /api/process-meeting,
+    accepting raw text directly — handy for exercising OpenAI -> Fal.ai/Cala
+    without a microphone.
     """
     if not payload.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty.")
 
-    def fallback() -> ProcessMeetingResponse:
-        return ProcessMeetingResponse(**MOCK_PROCESS_MEETING_RESPONSE)
-
     try:
-        result = await run_in_threadpool(generate_meeting_outputs, payload.text)
-    except MissingAPIKeyError as exc:
-        return _resolve_with_fallback("process-text", exc, 500, fallback)
-    except UpstreamServiceError as exc:
-        return _resolve_with_fallback("process-text", exc, 502, fallback)
-    except Exception as exc:
-        return _resolve_with_fallback("process-text", exc, 500, fallback)
+        result = await run_full_orchestration(payload.text)
+    except (MissingAPIKeyError, UpstreamServiceError) as exc:
+        _raise_for("process-text", exc)
 
     if payload.meetingId and not get_meeting(payload.meetingId):
         save_meeting(payload.meetingId, payload.text)
@@ -231,87 +187,38 @@ async def process_text(request: Request, payload: ProcessTextRequest) -> Process
 @app.post("/api/generate-asset", response_model=GenerateAssetResponse)
 @limiter.limit("15/minute")
 async def generate_asset(request: Request, payload: GenerateAssetRequest) -> GenerateAssetResponse:
-    """Generate a 16:9 mockup/moodboard image via Fal.ai Flux Schnell."""
+    """Generate (or regenerate) a single 16:9 mockup/moodboard image via Fal.ai Flux Schnell."""
     if not payload.prompt.strip():
         raise HTTPException(status_code=422, detail="prompt must not be empty.")
 
-    def fallback() -> GenerateAssetResponse:
-        return GenerateAssetResponse(**MOCK_GENERATE_ASSET_RESPONSE)
-
     try:
-        image_url = await run_in_threadpool(
-            generate_visual_asset,
-            payload.prompt
-        )
+        image_url = await run_in_threadpool(generate_visual_asset, payload.prompt)
+    except (MissingAPIKeyError, UpstreamServiceError) as exc:
+        _raise_for("generate-asset", exc)
 
-        if not get_meeting(payload.meetingId):
-            save_meeting(payload.meetingId, "")
+    if not get_meeting(payload.meetingId):
+        save_meeting(payload.meetingId, "")
+    save_asset(meeting_id=payload.meetingId, prompt=payload.prompt, image_url=image_url)
 
-        save_asset(
-            meeting_id=payload.meetingId,
-            prompt=payload.prompt,
-            image_url=image_url
-        )
-
-        return GenerateAssetResponse(imageUrl=image_url)
-    
-    except MissingAPIKeyError as exc:
-        return _resolve_with_fallback("generate-asset", exc, 500, fallback)
-    except UpstreamServiceError as exc:
-        return _resolve_with_fallback("generate-asset", exc, 502, fallback)
-    except Exception as exc:
-        return _resolve_with_fallback("generate-asset", exc, 500, fallback)
+    return GenerateAssetResponse(imageUrl=image_url)
 
 
 @app.post("/api/data-insights", response_model=DataInsightsResponse)
 @limiter.limit("15/minute")
-async def data_insights(request: Request, payload: DataInsightsRequest):
+async def data_insights(request: Request, payload: DataInsightsRequest) -> DataInsightsResponse:
+    """Raw Cala knowledge-query passthrough (see services/cala_service.py) — persists results per meeting."""
     try:
-        # Consultar Cala
-        cala_data = await run_in_threadpool(
-            fetch_data_insights,
-            payload.transcript
-        )
+        cala_data = await run_in_threadpool(fetch_data_insights, payload.transcript)
+    except (MissingAPIKeyError, UpstreamServiceError) as exc:
+        _raise_for("data-insights", exc)
 
-        results = cala_data.get("results", [])[:8]
-        entities = cala_data.get("entities", [])[:8]
+    results = cala_data.get("results", [])[:8]
+    entities = cala_data.get("entities", [])[:8]
 
-        # Asegurar que existe la reunión
-        if not get_meeting(payload.meetingId):
-            save_meeting(payload.meetingId, payload.transcript)
+    if not get_meeting(payload.meetingId):
+        save_meeting(payload.meetingId, payload.transcript)
 
-        # Guardar resultado de Cala en SQLite
-        save_context(
-            meeting_id=payload.meetingId,
-            context_type="cala_results",
-            value=json.dumps(results)
-        )
+    save_context(meeting_id=payload.meetingId, context_type="cala_results", value=json.dumps(results))
+    save_context(meeting_id=payload.meetingId, context_type="cala_entities", value=json.dumps(entities))
 
-        save_context(
-            meeting_id=payload.meetingId,
-            context_type="cala_entities",
-            value=json.dumps(entities)
-        )
-
-        return DataInsightsResponse(
-            results=results,
-            entities=entities
-        )
-
-    except MissingAPIKeyError:
-        raise HTTPException(
-            status_code=500,
-            detail="Cala API is not configured."
-        )
-
-    except UpstreamServiceError:
-        raise HTTPException(
-            status_code=502,
-            detail="Unable to retrieve Cala insights."
-        )
-
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to process data insights."
-        )
+    return DataInsightsResponse(results=results, entities=entities)

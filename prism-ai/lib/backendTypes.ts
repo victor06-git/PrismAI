@@ -5,17 +5,27 @@
  * (richer) domain model. lib/adapters.ts translates between the two.
  */
 
-export type BackendTag = "Frontend" | "Backend" | "Design" | "Infra";
-export type BackendPriority = "High" | "Medium" | "Low";
+export type BackendTag = "Frontend" | "Backend" | "AI" | "Design" | "Security";
+export type BackendUrgency = "Low" | "Medium" | "High" | "Critical";
+export type BackendBadge = "Quick Win" | "Strategic Initiative" | "Re-evaluate" | "Balanced";
 export type BackendTrend = "up" | "down" | "flat";
+export type BackendMagnitude = "intimate" | "notable" | "big" | "massive";
+export type BackendInsightSource = "cala" | "ai";
 
+/** Already scored + sorted by the backend's priority algorithm (services/orchestrator.py). */
 export interface BackendTicket {
   id: string;
   title: string;
+  description: string;
   tag: BackendTag;
-  priority: BackendPriority;
   storyPoints: number;
+  complexityScore: number;
+  businessImpact: number;
+  urgency: BackendUrgency;
+  dependencies: string[];
   acceptanceCriteria: string[];
+  priorityScore: number;
+  badge: BackendBadge;
 }
 
 export interface BackendVisualAsset {
@@ -24,6 +34,7 @@ export interface BackendVisualAsset {
   imageUrl?: string | null;
 }
 
+/** "Data as Art" — see backend/schemas.py's CalaDataInsight docstring. */
 export interface BackendDataInsight {
   id: string;
   question: string;
@@ -31,6 +42,9 @@ export interface BackendDataInsight {
   value: string;
   trend: BackendTrend;
   summary: string;
+  comparison: string;
+  magnitude: BackendMagnitude;
+  source: BackendInsightSource | null;
 }
 
 export interface BackendTranscriptSegment {

@@ -11,7 +11,7 @@ export function Dashboard() {
       <div className="flex flex-col items-center gap-6">
         <button
           type="button"
-          onClick={() => router.push("/inbox?start=1")}
+          onClick={() => router.push("/meetings")}
           aria-label="Press to start"
           className="inline-flex h-24 w-24 items-center justify-center rounded-full bg-prisma-text text-white transition-colors hover:bg-[#3a3a3a] focus:outline-none focus-visible:ring-2 focus-visible:ring-prisma-accent focus-visible:ring-offset-2 focus-visible:ring-offset-prisma-canvas md:h-28 md:w-28"
         >

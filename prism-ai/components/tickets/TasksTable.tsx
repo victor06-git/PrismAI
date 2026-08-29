@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Bug, CheckSquare, Layers, Plus, X, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { demoTickets } from "@/data/mockData";
 import type { Ticket, TicketType } from "@/types";
 
 type BoardColumn = "pending" | "in_progress" | "done";
@@ -157,7 +156,7 @@ function TaskDetailModal({
   );
 }
 
-export function TasksTable({ tickets = demoTickets }: { tickets?: Ticket[] }) {
+export function TasksTable({ tickets }: { tickets: Ticket[] }) {
   const [board, setBoard] = useState<Record<BoardColumn, Ticket[]>>({
     pending: tickets,
     in_progress: [],

@@ -18,17 +18,22 @@ Protocol (JSON text frames unless noted):
     {"type": "ERROR", "message": "..."}
 
 Chunking note (read before changing the client): each binary frame must be
-an independently-decodable audio file, not an arbitrary slice of one. A
-MediaRecorder's `ondataavailable` chunks are only self-contained for the
-very first chunk — later ones are raw continuation data with no container
-header, so Whisper can't read them standalone. The client is expected to
-stop() and immediately restart() its MediaRecorder every ~4s, sending each
-resulting (small, valid) file as one frame. The unavoidable cost of that
-approach: a word spoken exactly across a restart boundary can be split or
-partially lost. Getting that to zero requires OpenAI's separate Realtime
-API (a materially different integration) — this module does not claim to
-solve it, only to keep the loss confined to segment boundaries instead of
-losing whole sentences.
+an independently-decodable audio file, not an arbitrary slice of one. The
+client (useLiveAudioStream.ts) captures raw PCM continuously via an
+AudioWorklet — never a MediaRecorder restart loop — and cuts a new WAV
+segment either on a detected silence gap (lightweight RMS-based VAD) or a
+hard duration cap, whichever comes first, so cuts land between words
+whenever there's a natural pause to land in. Every segment also carries a
+short (~400ms) overlap of trailing audio from the previous one, so a word
+that still gets cut mid-syllable by the hard cap is never fully lost — it
+shows up complete in at least one of the two segments. The unavoidable
+side effect: Whisper sometimes transcribes that shared sliver twice, once
+per segment — _dedupe_segment_overlap (below) trims the repeat off the
+front of the newer segment's text before it's appended or broadcast, on a
+simple trailing-words-match basis (word-level, not audio-level). Getting
+segment loss to *zero* still requires OpenAI's separate Realtime API (a
+materially different integration) — this module doesn't claim that, only
+to make boundary loss the rare/partial exception instead of the norm.
 
 Progressive extraction: re-running GPT structured extraction on every single
 ~4s chunk would be slow and expensive, so it only re-runs every
@@ -46,11 +51,12 @@ from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 
 from database import save_asset, save_context, save_meeting
-from schemas import CalaDataInsight, Ticket, VisualAssetPrompt
+from schemas import CalaDataInsight, TicketDraft, VisualAssetPrompt
 from services.cala_service import fetch_data_insights_typed
 from services.clients import MissingAPIKeyError, UpstreamServiceError, logger
 from services.fal_service import generate_visual_asset
 from services.openai_service import generate_meeting_outputs_incremental
+from services.orchestrator import score_and_sort_tickets
 from services.whisper_service import transcribe_audio
 
 # --- Hardening knobs ---------------------------------------------------
@@ -66,6 +72,34 @@ MIN_TRANSCRIPT_GROWTH_CHARS = 20  # skip re-extraction if barely anything new wa
 _active_sessions = 0
 _active_sessions_lock = asyncio.Lock()
 
+MAX_OVERLAP_WORDS = 6
+
+
+def _dedupe_segment_overlap(previous: str, new: str) -> str:
+    """
+    The client now captures raw PCM continuously and deliberately repeats a
+    ~400ms tail of audio at the start of every new segment (see
+    useLiveAudioStream.ts) instead of hard-cutting mid-word — that fixes
+    words getting silently truncated at a chunk boundary, at the cost of
+    Whisper sometimes transcribing that shared sliver of audio twice: once
+    trailing the previous segment, once leading this one. Trim the
+    repeated words off the front of `new` before it's shown/appended,
+    instead of leaving a visible/contextual duplicate.
+    """
+    if not previous or not new:
+        return new
+    prev_words = previous.split()
+    new_words = new.split()
+    max_check = min(MAX_OVERLAP_WORDS, len(prev_words), len(new_words))
+
+    def _norm(word: str) -> str:
+        return word.lower().strip(".,!?;:\"'")
+
+    for overlap in range(max_check, 0, -1):
+        if [_norm(w) for w in prev_words[-overlap:]] == [_norm(w) for w in new_words[:overlap]]:
+            return " ".join(new_words[overlap:])
+    return new
+
 
 @dataclass
 class LiveMeetingSession:
@@ -78,13 +112,23 @@ class LiveMeetingSession:
     seen_ticket_titles: set[str] = field(default_factory=set)
     seen_asset_names: set[str] = field(default_factory=set)
     seen_insight_questions: set[str] = field(default_factory=set)
+    insight_counter: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    def record_chunk_text(self, text: str) -> None:
+    def record_chunk_text(self, text: str) -> str:
+        """Appends this segment's text to the running transcript, trimming any
+        leading words that just repeat the tail of the previous segment (see
+        _dedupe_segment_overlap). Returns the trimmed text actually appended —
+        callers should broadcast THIS, not the raw `text` argument, so the
+        client never sees a duplicated word either."""
         self.chunk_count += 1
         text = text.strip()
-        if text:
-            self.cumulative_text = f"{self.cumulative_text} {text}".strip()
+        if not text:
+            return ""
+        trimmed = _dedupe_segment_overlap(self.cumulative_text, text)
+        if trimmed:
+            self.cumulative_text = f"{self.cumulative_text} {trimmed}".strip()
+        return trimmed
 
     def should_extract(self) -> bool:
         if self.is_extracting or self.chunk_count == 0:
@@ -98,10 +142,13 @@ class LiveMeetingSession:
             return False
         return self.chunk_count % CALA_EVERY_N_CHUNKS == 0
 
-    def dedupe_tickets(self, tickets: list[Ticket]) -> list[Ticket]:
-        fresh = [t for t in tickets if t.title not in self.seen_ticket_titles]
-        self.seen_ticket_titles.update(t.title for t in fresh)
-        return fresh
+    def dedupe_ticket_drafts(self, drafts: list[TicketDraft]) -> tuple[list[TicketDraft], int]:
+        """Returns the genuinely-new drafts plus the id-numbering offset to score them at
+        (score_and_sort_tickets(fresh, start_index=offset)) — ids stay unique across rounds."""
+        start_index = len(self.seen_ticket_titles)
+        fresh = [d for d in drafts if d.title not in self.seen_ticket_titles]
+        self.seen_ticket_titles.update(d.title for d in fresh)
+        return fresh, start_index
 
     def dedupe_assets(self, assets: list[VisualAssetPrompt]) -> list[VisualAssetPrompt]:
         fresh = [a for a in assets if a.assetName not in self.seen_asset_names]
@@ -109,8 +156,26 @@ class LiveMeetingSession:
         return fresh
 
     def dedupe_insights(self, insights: list[CalaDataInsight]) -> list[CalaDataInsight]:
-        fresh = [i for i in insights if i.question not in self.seen_insight_questions]
-        self.seen_insight_questions.update(i.question for i in fresh)
+        """Filters to genuinely-new questions AND re-stamps `id` on the way out.
+
+        Both _run_extraction (GPT) and _run_cala (Cala) restart their own id
+        numbering from 1 on every call ("INS-1", "CALA-1", ...) — fine for a
+        single one-shot response, but this session calls each repeatedly as
+        the meeting progresses, so round 2's "INS-1" collides with round 1's
+        "INS-1" once both reach the client (duplicate React keys, and the
+        second silently clobbers the first in any id-keyed client state).
+        Re-stamping with a session-wide counter keeps every card this session
+        ever emits unique, the same way score_and_sort_tickets never trusts
+        the model's own ticket numbering either.
+        """
+        fresh_raw = [i for i in insights if i.question not in self.seen_insight_questions]
+        self.seen_insight_questions.update(i.question for i in fresh_raw)
+
+        fresh: list[CalaDataInsight] = []
+        for insight in fresh_raw:
+            self.insight_counter += 1
+            prefix = "CALA" if insight.source == "cala" else "INS"
+            fresh.append(insight.model_copy(update={"id": f"{prefix}-{self.insight_counter}"}))
         return fresh
 
 
@@ -192,7 +257,11 @@ async def websocket_live_session(websocket: WebSocket) -> None:
 
 async def _process_chunk(session: LiveMeetingSession, chunk: bytes, send_event) -> None:
     try:
-        transcription = await asyncio.to_thread(transcribe_audio, chunk, f"segment-{session.chunk_count}.webm")
+        # The client now captures raw PCM and encodes each segment as a WAV
+        # itself (see useLiveAudioStream.ts) instead of a MediaRecorder-produced
+        # webm/opus container — the filename extension must match so Whisper
+        # doesn't try to decode it as the wrong format.
+        transcription = await asyncio.to_thread(transcribe_audio, chunk, f"segment-{session.chunk_count}.wav")
     except (MissingAPIKeyError, UpstreamServiceError) as exc:
         # Deliberately NOT falling back to mock text here, unlike the batch
         # endpoints — a "live" transcript silently switching to canned demo
@@ -205,11 +274,11 @@ async def _process_chunk(session: LiveMeetingSession, chunk: bytes, send_event) 
         await send_event("ERROR", message="Unexpected transcription error.")
         return
 
-    session.record_chunk_text(transcription.text)
-    if transcription.text:
+    new_text = session.record_chunk_text(transcription.text)
+    if new_text:
         await send_event(
             "TRANSCRIPT_UPDATE",
-            text=transcription.text,
+            text=new_text,
             cumulativeText=session.cumulative_text,
             segmentIndex=session.chunk_count,
         )
@@ -245,11 +314,20 @@ async def _run_extraction(session: LiveMeetingSession, send_event) -> None:
             session.text_at_last_extraction = text_snapshot
 
     async with session.lock:
-        new_tickets = session.dedupe_tickets(extracted.tickets)
+        fresh_drafts, start_index = session.dedupe_ticket_drafts(extracted.tickets)
         new_assets = session.dedupe_assets(extracted.visualAssets)
+        # The LLM's own "Data as Art" narration (source="ai") — emitted here
+        # too, not just Cala's real facts from _run_cala below, so the canvas
+        # doesn't lose the business-metric estimate just because Cala also
+        # recognized an unrelated real-world entity in the same transcript.
+        new_ai_insights = session.dedupe_insights(extracted.dataInsights)
 
+    new_tickets = score_and_sort_tickets(fresh_drafts, start_index=start_index)
     for ticket in new_tickets:
         await send_event("NEW_TICKET", ticket=ticket.model_dump())
+
+    for insight in new_ai_insights:
+        await send_event("CALA_METRIC", insight=insight.model_dump())
 
     for asset in new_assets:
         asyncio.create_task(_generate_moodboard_image(session, asset, send_event))

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, MessageSquare } from "lucide-react";
+import { ArrowLeft, Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListeningBar } from "@/components/meeting/ListeningBar";
 import { LiveTranscriptRail } from "@/components/meeting/LiveTranscriptRail";
@@ -18,6 +18,10 @@ const statusTabs: { id: StatusTab; label: string }[] = [
 ];
 
 const emptyCopy = {
+  moodboard: {
+    title: "No moodboard yet",
+    body: "Visual concepts render on the Meetings page as design ideas come up in a live recording.",
+  },
   metrics: {
     title: "No metrics yet",
     body: "KPI questions and data insights from the meeting will show up in this tab.",
@@ -79,20 +83,17 @@ export function InboxWorkspace() {
           <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-x border-prisma-border bg-prisma-surface">
             {status === "tasks" ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-14">
-                <TasksTable />
+                <TasksTable tickets={[]} />
               </div>
             ) : status === "moodboard" ? (
-              <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto px-8 py-8 pb-24">
-                <div
-                  className="relative flex aspect-[4/3] w-full max-w-lg items-center justify-center overflow-hidden rounded-md border border-prisma-border bg-prisma-canvas"
-                  aria-busy="true"
-                  aria-label="Generating moodboard image"
-                >
-                  <div
-                    className="h-8 w-8 animate-spin rounded-full border-2 border-prisma-border border-t-prisma-text"
-                    aria-hidden="true"
-                  />
+              <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-prisma-border bg-prisma-canvas">
+                  <ImageIcon className="h-6 w-6 text-prisma-muted stroke-[1.5]" />
                 </div>
+                <h2 className="font-serif text-2xl tracking-tight text-prisma-text">{emptyCopy.moodboard.title}</h2>
+                <p className="mt-2 max-w-sm text-center text-sm leading-relaxed text-prisma-muted">
+                  {emptyCopy.moodboard.body}
+                </p>
               </div>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
