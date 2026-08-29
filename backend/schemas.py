@@ -83,9 +83,22 @@ class ProcessMeetingResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class GenerateAssetRequest(BaseModel):
-    prompt: str = Field(description="Image generation prompt for Fal.ai Flux Schnell.")
+# class GenerateAssetRequest(BaseModel):
+#     prompt: str = Field(description="Image generation prompt for Fal.ai Flux Schnell.")
 
+class GenerateAssetRequest(BaseModel):
+    meetingId: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Meeting identifier."
+    )
+
+    prompt: str = Field(
+        min_length=10,
+        max_length=2000,
+        description="Image generation prompt for Fal.ai Flux Schnell."
+    )
+    
 
 class GenerateAssetResponse(BaseModel):
     imageUrl: str

@@ -26,6 +26,7 @@ from mock_data import (
     MOCK_GENERATE_ASSET_RESPONSE,
     MOCK_PROCESS_MEETING_RESPONSE,
 )
+from database import init_db, save_asset, save_meeting
 from schemas import (
     DataInsightsRequest,
     DataInsightsResponse,
@@ -52,6 +53,8 @@ app = FastAPI(
     description="Real-time meeting copilot: backlog, moodboards & data insights.",
     version="0.2.0",
 )
+
+init_db()
 
 # CORS — allow the Next.js frontend running on localhost to call this API.
 app.add_middleware(
