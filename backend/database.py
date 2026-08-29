@@ -1,0 +1,134 @@
+import sqlite3
+from pathlib import Path
+from datetime import datetime, timezone
+
+
+# backend/data/prismai.db
+DATA_DIR = Path(__file__).parent / "data"
+DB_PATH = DATA_DIR / "prismai.db"
+
+def get_connection():
+    DATA_DIR.mkdir(exist_ok=True)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    return conn
+
+
+def init_db():
+    with get_connection() as conn:
+
+        # Reuniones
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meetings (
+                id TEXT PRIMARY KEY,
+                transcript TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # Imágenes generadas por Fal
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                image_url TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (meeting_id)
+                    REFERENCES meetings(id)
+                    ON DELETE CASCADE
+            )
+        """)
+
+        # Contexto obtenido de Cala
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS context_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                value TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (meeting_id)
+                    REFERENCES meetings(id)
+                    ON DELETE CASCADE
+            )
+        """)
+
+
+def save_meeting(meeting_id: str, transcript: str):
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO meetings (id, transcript, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id)
+            DO UPDATE SET transcript = excluded.transcript
+            """,
+            (meeting_id, transcript, now)
+        )
+
+
+def save_asset(meeting_id: str, prompt: str, image_url: str):
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO assets (
+                meeting_id,
+                prompt,
+                image_url,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (meeting_id, prompt, image_url, now)
+        )
+
+        return cursor.lastrowid
+
+
+def save_context(meeting_id: str, context_type: str, value: str):
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO context_insights (
+                meeting_id,
+                type,
+                value,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (meeting_id, context_type, value, now)
+        )
+
+        return cursor.lastrowid
+
+def get_meeting(meeting_id: str):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM meetings WHERE id = ?",
+            (meeting_id,)
+        ).fetchone()
+
+        return dict(row) if row else None
+
+if __name__ == "__main__":
+    init_db()
+
+    save_meeting(
+        "demo-1",
+        "We need a modern landing page for a productivity SaaS."
+    )
+
+    meeting = get_meeting("demo-1")
+
+    print(meeting)
