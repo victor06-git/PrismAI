@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, MessageSquare, Plus, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListeningBar } from "@/components/meeting/ListeningBar";
+import { TasksTable } from "@/components/tickets/TasksTable";
+import { demoTickets } from "@/data/mockData";
 
 type StatusTab = "tasks" | "moodboard" | "metrics";
 type ViewId = "meetings" | "tickets" | "sprint" | "insights";
@@ -115,22 +117,30 @@ export function InboxWorkspace() {
                 )}
               >
                 {tab.label}{" "}
-                <span className="text-prisma-muted">0</span>
+                <span className="text-prisma-muted">
+                  {tab.id === "tasks" ? demoTickets.length : 0}
+                </span>
               </button>
             ))}
           </div>
 
-          <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
-            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-prisma-border bg-prisma-canvas">
-              <MessageSquare className="h-6 w-6 text-prisma-muted stroke-[1.5]" />
+          {status === "tasks" ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-14">
+              <TasksTable />
             </div>
-            <h2 className="text-lg font-medium tracking-tight text-prisma-text">
-              {emptyCopy[status].title}
-            </h2>
-            <p className="mt-2 max-w-sm text-center text-sm leading-relaxed text-prisma-muted">
-              {emptyCopy[status].body}
-            </p>
-          </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
+              <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-prisma-border bg-prisma-canvas">
+                <MessageSquare className="h-6 w-6 text-prisma-muted stroke-[1.5]" />
+              </div>
+              <h2 className="text-lg font-medium tracking-tight text-prisma-text">
+                {emptyCopy[status].title}
+              </h2>
+              <p className="mt-2 max-w-sm text-center text-sm leading-relaxed text-prisma-muted">
+                {emptyCopy[status].body}
+              </p>
+            </div>
+          )}
 
           {showBar && (
             <ListeningBar
