@@ -10,7 +10,6 @@ const WAVE_BARS = [
 interface ListeningBarProps {
   listening: boolean;
   onTogglePause: () => void;
-  onComplete?: () => void;
 }
 
 export function ListeningBar({
@@ -18,17 +17,17 @@ export function ListeningBar({
   onTogglePause,
 }: ListeningBarProps) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-6 pb-6">
-      <div
-        className="pointer-events-auto flex items-center gap-2 animate-slide-in-up"
-        role="status"
-        aria-label={listening ? "Listening" : "Paused"}
-      >
+    <div
+      className="flex shrink-0 items-center justify-center px-6 pb-6 pt-3"
+      role="status"
+      aria-label={listening ? "Listening" : "Paused"}
+    >
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onTogglePause}
           aria-label={listening ? "Pause recording" : "Resume recording"}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#E8E8E0] bg-prisma-canvas transition-colors hover:bg-[#EFEFE8] focus:outline-none focus-visible:ring-2 focus-visible:ring-prisma-accent focus-visible:ring-offset-2 focus-visible:ring-offset-prisma-surface"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#E8E8E0] bg-prisma-canvas transition-colors hover:bg-[#EFEFE8] focus:outline-none focus-visible:ring-2 focus-visible:ring-prisma-accent focus-visible:ring-offset-2 focus-visible:ring-offset-[#D8D8D1]"
         >
           <span className="block h-2.5 w-2.5 rounded-[2px] bg-white" />
         </button>

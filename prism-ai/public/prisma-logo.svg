@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
+  <!-- left extruded face -->
+  <path
+    d="M78 58 L42 92 L42 168 L78 202 Z"
+    fill="#111111"
+  />
+  <!-- front triangular face -->
+  <path
+    d="M120 28 L188 202 L78 202 Z"
+    fill="#FFFFFF"
+    stroke="#111111"
+    stroke-width="12"
+    stroke-linejoin="round"
+  />
+  <!-- eyes -->
+  <ellipse cx="108" cy="118" rx="9" ry="16" fill="#111111" />
+  <ellipse cx="138" cy="118" rx="9" ry="16" fill="#111111" />
+  <circle cx="105" cy="111" r="2.8" fill="#FFFFFF" />
+  <circle cx="135" cy="111" r="2.8" fill="#FFFFFF" />
+  <!-- smile -->
+  <path
+    d="M112 152 Q123 164 134 152"
+    stroke="#111111"
+    stroke-width="5"
+    stroke-linecap="round"
+    fill="none"
+  />
+</svg>

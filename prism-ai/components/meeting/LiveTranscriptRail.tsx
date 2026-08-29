@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { demoTranscript, teamMembers } from "@/data/mockData";
+import { ListeningBar } from "@/components/meeting/ListeningBar";
 
 interface LiveTranscriptRailProps {
-  open: boolean;
-  onToggle: () => void;
   listening: boolean;
+  onTogglePause: () => void;
 }
 
 interface StreamedLine {
@@ -27,9 +26,8 @@ function wordsOf(text: string) {
 }
 
 export function LiveTranscriptRail({
-  open,
-  onToggle,
   listening,
+  onTogglePause,
 }: LiveTranscriptRailProps) {
   const [lines, setLines] = useState<StreamedLine[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -108,98 +106,72 @@ export function LiveTranscriptRail({
     (progressRef.current.lineIndex < demoTranscript.length || typing);
 
   return (
-    <aside className="relative flex h-full shrink-0">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-label={open ? "Close transcript" : "Open transcript"}
-        className={cn(
-          "absolute top-1/2 z-30 flex h-16 w-5 -translate-y-1/2 items-center justify-center text-prisma-muted transition-colors hover:text-prisma-text",
-          open
-            ? "left-0 rounded-r-md"
-            : "left-0 -translate-x-full rounded-l-md border border-r-0 border-[#D0D0C8] bg-[#D8D8D1]",
-        )}
-      >
-        {open ? (
-          <ChevronRight className="h-4 w-4 stroke-[1.5]" />
-        ) : (
-          <ChevronLeft className="h-4 w-4 stroke-[1.5]" />
-        )}
-      </button>
-
-      <div
-        className={cn(
-          "flex h-full overflow-hidden rounded-t-md bg-[#D8D8D1] transition-[width] duration-300 ease-out",
-          open ? "w-[340px]" : "w-0",
-        )}
-      >
-        <div className="flex h-full w-[340px] shrink-0 flex-col pt-5">
-          <header className="flex shrink-0 items-center justify-between px-5 pb-5">
-            <h2 className="font-serif text-lg font-semibold leading-snug tracking-tight text-prisma-text">
-              Transcript
-            </h2>
+    <aside className="flex h-full w-[340px] shrink-0 flex-col overflow-hidden border-b border-solid border-[#C4C4BC] bg-[#D8D8D1] pt-5">
+      <header className="flex shrink-0 items-center justify-between border-b border-solid border-[#C4C4BC] px-5 pb-5">
+        <h2 className="font-serif text-lg font-semibold leading-snug tracking-tight text-prisma-text">
+          Transcript
+        </h2>
+        <span
+          className={cn(
+            "flex items-center gap-1.5 font-serif text-lg font-semibold leading-snug tracking-tight",
+            recording ? "text-prisma-danger" : "text-prisma-muted",
+          )}
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            {recording && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-prisma-danger opacity-60" />
+            )}
             <span
               className={cn(
-                "flex items-center gap-1.5 text-[11px]",
-                recording ? "text-prisma-danger" : "text-prisma-muted",
+                "relative inline-flex h-1.5 w-1.5 rounded-full",
+                recording ? "bg-prisma-danger" : "bg-[#C8C8C2]",
+              )}
+            />
+          </span>
+          {recording ? "Live" : listening ? "Paused" : "Idle"}
+        </span>
+      </header>
+
+      <div
+        ref={scrollRef}
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3 pt-2"
+      >
+        {lines.map((line, index) => {
+          const outgoing = isOutgoing(line.speaker);
+          const isTyping = typing && index === lines.length - 1;
+
+          return (
+            <article
+              key={line.id}
+              className={cn(
+                "flex",
+                outgoing ? "justify-end" : "justify-start",
               )}
             >
-              <span className="relative flex h-1.5 w-1.5">
-                {recording && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-prisma-danger opacity-60" />
+              <p
+                className={cn(
+                  "w-fit max-w-[85%] rounded-[18px] px-3.5 py-2 text-sm leading-relaxed",
+                  outgoing
+                    ? "bg-[#1E4550] text-white"
+                    : "bg-white text-prisma-text",
                 )}
-                <span
-                  className={cn(
-                    "relative inline-flex h-1.5 w-1.5 rounded-full",
-                    recording ? "bg-prisma-danger" : "bg-[#C8C8C2]",
-                  )}
-                />
-              </span>
-              {recording ? "Live" : listening ? "Paused" : "Idle"}
-            </span>
-          </header>
-
-          <div
-            ref={scrollRef}
-            className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-5 pt-2"
-          >
-            {lines.map((line, index) => {
-              const outgoing = isOutgoing(line.speaker);
-              const isTyping = typing && index === lines.length - 1;
-
-              return (
-                <article
-                  key={line.id}
-                  className={cn(
-                    "flex",
-                    outgoing ? "justify-end" : "justify-start",
-                  )}
-                >
-                  <p
+              >
+                {line.displayedText}
+                {isTyping && (
+                  <span
                     className={cn(
-                      "w-fit max-w-[85%] rounded-[18px] px-3.5 py-2 text-sm leading-relaxed",
-                      outgoing
-                        ? "bg-[#1E4550] text-white"
-                        : "bg-white text-prisma-text",
+                      "ml-0.5 inline-block h-3 w-px translate-y-[1px] animate-pulse align-middle",
+                      outgoing ? "bg-white/80" : "bg-prisma-text",
                     )}
-                  >
-                    {line.displayedText}
-                    {isTyping && (
-                      <span
-                        className={cn(
-                          "ml-0.5 inline-block h-3 w-px translate-y-[1px] animate-pulse align-middle",
-                          outgoing ? "bg-white/80" : "bg-prisma-text",
-                        )}
-                      />
-                    )}
-                  </p>
-                </article>
-              );
-            })}
-          </div>
-        </div>
+                  />
+                )}
+              </p>
+            </article>
+          );
+        })}
       </div>
+
+      <ListeningBar listening={listening} onTogglePause={onTogglePause} />
     </aside>
   );
 }

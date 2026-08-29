@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, MessageSquare } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ListeningBar } from "@/components/meeting/ListeningBar";
 import { LiveTranscriptRail } from "@/components/meeting/LiveTranscriptRail";
+import { MetricsStream } from "@/components/inbox/MetricsStream";
 import { TasksTable } from "@/components/tickets/TasksTable";
 
 type StatusTab = "tasks" | "moodboard" | "metrics";
@@ -17,22 +17,13 @@ const statusTabs: { id: StatusTab; label: string }[] = [
   { id: "metrics", label: "Metrics" },
 ];
 
-const emptyCopy = {
-  metrics: {
-    title: "No metrics yet",
-    body: "KPI questions and data insights from the meeting will show up in this tab.",
-  },
-};
-
 export function InboxWorkspace() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const sessionActive = searchParams.get("start") === "1";
-
-  const [status, setStatus] = useState<StatusTab>("tasks");
+  const [status, setStatus] = useState<StatusTab>("metrics");
   const [listening, setListening] = useState(true);
-  const [showBar, setShowBar] = useState(sessionActive);
-  const [transcriptOpen, setTranscriptOpen] = useState(true);
+  const [revealed, setRevealed] = useState(false);
+
+  const showGenerating = listening && !revealed;
+  const activeStatus = showGenerating ? "metrics" : status;
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-prisma-canvas animate-fade-in">
@@ -46,43 +37,60 @@ export function InboxWorkspace() {
         </Link>
       </aside>
 
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 bg-prisma-canvas pt-10 transition-[padding,gap] duration-300",
-          transcriptOpen ? "gap-2" : "pr-6",
-        )}
-      >
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-end gap-1">
-            {statusTabs.map((tab) => {
-              const active = status === tab.id;
+      <div className="flex min-w-0 flex-1 gap-2 bg-prisma-canvas">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col pt-10">
+          <div
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1 flex-col",
+              showGenerating && "pointer-events-none select-none blur-[6px]",
+            )}
+            aria-hidden={showGenerating}
+          >
+            <div className="flex shrink-0 items-end border-b border-prisma-border">
+              {statusTabs.map((tab, index) => {
+                const active = activeStatus === tab.id;
 
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setStatus(tab.id)}
-                  className={cn(
-                    "relative px-5 py-2 font-serif text-lg leading-snug tracking-tight transition-colors",
-                    active
-                      ? "z-10 -mb-px border-t border-x border-prisma-border bg-prisma-surface text-prisma-text"
-                      : "border border-prisma-border bg-[#E4E4DE] text-prisma-muted hover:text-prisma-text",
-                  )}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-            <div className="min-w-0 flex-1 self-stretch border-b border-prisma-border" />
-          </div>
+                return (
+                  <Fragment key={tab.id}>
+                    {index > 0 && (
+                      <div className="w-1 shrink-0" aria-hidden="true" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setStatus(tab.id)}
+                      className={cn(
+                        "relative border-x border-t border-prisma-border px-5 py-2 font-serif text-lg leading-snug tracking-tight transition-colors",
+                        active
+                          ? "z-10 bg-prisma-surface text-prisma-text after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-prisma-surface"
+                          : "bg-[#E4E4DE] text-prisma-muted hover:text-prisma-text",
+                      )}
+                    >
+                      {tab.label}
+                    </button>
+                  </Fragment>
+                );
+              })}
+              <div className="min-w-0 flex-1" />
+            </div>
 
-          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-x border-prisma-border bg-prisma-surface">
-            {status === "tasks" ? (
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-14">
-                <TasksTable />
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-x border-prisma-border bg-prisma-surface">
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col overflow-hidden",
+                  activeStatus !== "tasks" && "hidden",
+                )}
+              >
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <TasksTable />
+                </div>
               </div>
-            ) : status === "moodboard" ? (
-              <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto px-8 py-8 pb-24">
+
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 items-start justify-center overflow-auto px-8 py-8",
+                  activeStatus !== "moodboard" && "hidden",
+                )}
+              >
                 <div
                   className="relative flex aspect-[4/3] w-full max-w-lg items-center justify-center overflow-hidden rounded-md border border-prisma-border bg-prisma-canvas"
                   aria-busy="true"
@@ -94,38 +102,46 @@ export function InboxWorkspace() {
                   />
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
-                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-prisma-border bg-prisma-canvas">
-                  <MessageSquare className="h-6 w-6 text-prisma-muted stroke-[1.5]" />
-                </div>
-                <h2 className="font-serif text-2xl tracking-tight text-prisma-text">
-                  {emptyCopy.metrics.title}
-                </h2>
-                <p className="mt-2 max-w-sm text-center text-sm leading-relaxed text-prisma-muted">
-                  {emptyCopy.metrics.body}
-                </p>
-              </div>
-            )}
 
-            {showBar && (
-              <ListeningBar
-                listening={listening}
-                onTogglePause={() => setListening((prev) => !prev)}
-                onComplete={() => {
-                  setShowBar(false);
-                  setListening(false);
-                  router.replace("/inbox");
-                }}
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col overflow-hidden",
+                  activeStatus !== "metrics" && "hidden",
+                )}
+              >
+                <MetricsStream listening={listening} />
+              </div>
+            </main>
+          </div>
+
+          {showGenerating && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-8 pt-10">
+              <Image
+                src="/prisma-logo.svg"
+                alt="Prisma"
+                width={120}
+                height={120}
+                className="h-[88px] w-auto object-contain md:h-[104px]"
+                priority
+                unoptimized
               />
-            )}
-          </main>
+              <p className="animate-text-shine mt-6 font-serif text-3xl font-bold leading-snug tracking-tight md:text-4xl">
+                Generating...
+              </p>
+              <button
+                type="button"
+                onClick={() => setRevealed(true)}
+                className="mt-6 inline-flex h-11 items-center justify-center rounded-md bg-prisma-text px-8 font-medium text-white transition-colors hover:bg-[#3a3a3a] focus:outline-none focus-visible:ring-2 focus-visible:ring-prisma-accent focus-visible:ring-offset-2 focus-visible:ring-offset-prisma-canvas"
+              >
+                View
+              </button>
+            </div>
+          )}
         </div>
 
         <LiveTranscriptRail
-          open={transcriptOpen}
-          onToggle={() => setTranscriptOpen((prev) => !prev)}
           listening={listening}
+          onTogglePause={() => setListening((prev) => !prev)}
         />
       </div>
     </div>
