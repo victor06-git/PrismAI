@@ -32,6 +32,40 @@
     "output_tokens": 45057,
     "api_call_count": 36
   },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_017fmRry4ZD6AhpikTUEdWH7",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "run"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "b54033c0e70a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 331,
+        "end": 332,
+        "entry_ids": [
+          "287c1bf6-7825-4b7b-bdd0-52c035842161"
+        ],
+        "tool_use_id": "toolu_017fmRry4ZD6AhpikTUEdWH7"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_017fmRry4ZD6AhpikTUEdWH7"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: run",
+        "default_collapsed": true
+      }
+    }
+  ],
   "session_metrics": {
     "turn_count": 2
   },
