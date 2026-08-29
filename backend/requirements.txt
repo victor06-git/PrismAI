@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+pydantic
+openai
+fal-client
+httpx
+python-dotenv
