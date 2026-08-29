@@ -105,7 +105,7 @@ export function LiveTranscriptRail({
     lastLine.displayedText !== lastSource.text;
   const recording =
     listening &&
-    (progressRef.current.lineIndex < demoTranscript.length || typing);
+    (lines.length < demoTranscript.length || typing);
 
   return (
     <aside className="relative flex h-full shrink-0">

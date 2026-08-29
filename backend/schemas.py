@@ -70,7 +70,11 @@ class CalaDataInsight(BaseModel):
 
 
 class ProcessMeetingRequest(BaseModel):
-    transcript: str = Field(description="Raw meeting transcript text to analyze.")
+    transcript: str = Field(
+        min_length=1,
+        max_length=50_000,
+        description="Raw meeting transcript text to analyze.",
+    )
 
 
 class ProcessMeetingResponse(BaseModel):

@@ -36,13 +36,14 @@ class UpstreamServiceError(Exception):
 # caller — so a live demo never shows a broken screen. Set
 # ENABLE_MOCK_FALLBACK=false to get real HTTPException(500/502) responses
 # instead (useful to verify error handling, or outside of a demo context).
-ENABLE_MOCK_FALLBACK = os.getenv("ENABLE_MOCK_FALLBACK", "true").strip().lower() != "false"
+ENABLE_MOCK_FALLBACK = os.getenv("ENABLE_MOCK_FALLBACK", "false").strip().lower() == "true"
 
 # ---------------------------------------------------------------------------
 # OpenAI
 # ---------------------------------------------------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = "gpt-4o-mini"
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-live-transcribe")
 
 if not OPENAI_API_KEY:
     logger.warning(
@@ -79,11 +80,9 @@ CALA_API_KEY = os.getenv("CALA_API_KEY")
 # build. CALA_API_BASE_URL is overridable via .env; point it at the real
 # endpoint once you have it. Until then this call will fail fast and
 # transparently fall back to mock insights (see services/cala_service.py).
-CALA_API_BASE_URL = os.getenv("CALA_API_BASE_URL", "https://api.cala.example.com/v1")
-
 CALA_API_BASE_URL = os.getenv(
     "CALA_API_BASE_URL",
-    "https://api.cala.ai/v1"
+    ""
 )
 
 def call_cala_api(
@@ -93,9 +92,9 @@ def call_cala_api(
     timeout: float = 60.0
 ) -> dict:
 
-    if not CALA_API_KEY:
+    if not CALA_API_KEY or not CALA_API_BASE_URL:
         raise MissingAPIKeyError(
-            "CALA_API_KEY is not configured."
+            "Cala is not configured with a real API key and base URL."
         )
 
     url = f"{CALA_API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"

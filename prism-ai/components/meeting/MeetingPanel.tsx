@@ -229,7 +229,7 @@ function ListeningVisualizer() {
           className="w-1 bg-blue-500 rounded-full animate-waveform"
           style={{
             animationDelay: `${i * 0.05}s`,
-            height: `${20 + Math.sin(i * 0.5) * 30 + Math.random() * 20}%`,
+            height: `${20 + Math.sin(i * 0.5) * 30 + Math.abs(Math.sin(i * 7.13)) * 20}%`,
           }}
         />
       ))}

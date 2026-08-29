@@ -15,10 +15,15 @@ Run locally with:
     uvicorn main:app --reload --port 8000
 """
 
+import hashlib
 import json
+import os
+import time
+from collections import defaultdict, deque
 from typing import Callable
 
-from fastapi import FastAPI, HTTPException
+import httpx
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
@@ -64,17 +69,32 @@ app = FastAPI(
 
 init_db()
 
-# CORS — allow the Next.js frontend running on localhost to call this API.
+_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_api_attempts: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _check_rate_limit(client_ip: str, bucket: str, limit: int) -> None:
+    now = time.monotonic()
+    attempts = _api_attempts[f"{bucket}:{client_ip}"]
+    while attempts and attempts[0] < now - 60:
+        attempts.popleft()
+    if len(attempts) >= limit:
+        raise HTTPException(status_code=429, detail="Too many requests. Try again shortly.")
+    attempts.append(now)
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +146,75 @@ async def health_check() -> dict:
     }
 
 
+@app.post("/api/realtime/session")
+async def create_realtime_session(request: Request) -> Response:
+    """Exchange a browser WebRTC offer for OpenAI's SDP answer without exposing the API key."""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI is not configured on the server.")
+
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip, "realtime", 5)
+    if request.headers.get("content-type", "").split(";", 1)[0] != "application/sdp":
+        raise HTTPException(status_code=415, detail="Content-Type must be application/sdp.")
+
+    offer = await request.body()
+    if not offer or len(offer) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Invalid or oversized SDP offer.")
+
+    from services.clients import OPENAI_TRANSCRIBE_MODEL
+
+    session = {
+        "type": "transcription",
+        "audio": {
+            "input": {
+                "transcription": {
+                    "model": OPENAI_TRANSCRIBE_MODEL,
+                    "languages": ["es", "en"],
+                    "delay": "low",
+                    "prompt": "Product and software hackathon meeting. Preserve names, acronyms and ticket terminology.",
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "silence_duration_ms": 650,
+                    "prefix_padding_ms": 300,
+                },
+            }
+        },
+    }
+    safety_id = hashlib.sha256(f"prismai-demo:{client_ip}".encode()).hexdigest()
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            upstream = await client.post(
+                "https://api.openai.com/v1/realtime/calls",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "OpenAI-Safety-Identifier": safety_id,
+                },
+                files={
+                    "sdp": (None, offer.decode("utf-8")),
+                    "session": (None, json.dumps(session)),
+                },
+            )
+    except (httpx.RequestError, UnicodeDecodeError) as exc:
+        logger.error("Realtime session connection failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not connect to live transcription.") from exc
+
+    if upstream.status_code >= 400:
+        logger.error("Realtime session rejected (%s): %s", upstream.status_code, upstream.text[:500])
+        raise HTTPException(status_code=502, detail="OpenAI rejected the live transcription session.")
+    return Response(content=upstream.text, media_type="application/sdp")
+
+
 @app.post("/api/process-meeting", response_model=ProcessMeetingResponse)
-async def process_meeting(payload: ProcessMeetingRequest) -> ProcessMeetingResponse:
+async def process_meeting(request: Request, payload: ProcessMeetingRequest) -> ProcessMeetingResponse:
     """
     Analyze a meeting transcript with OpenAI Structured Outputs (gpt-4o-mini)
     and return the backlog + visual asset prompts + data insights at once.
     """
     if not payload.transcript.strip():
         raise HTTPException(status_code=422, detail="transcript must not be empty.")
+    _check_rate_limit(request.client.host if request.client else "unknown", "analysis", 10)
 
     def fallback() -> ProcessMeetingResponse:
         return ProcessMeetingResponse(**MOCK_PROCESS_MEETING_RESPONSE)
@@ -149,10 +230,11 @@ async def process_meeting(payload: ProcessMeetingRequest) -> ProcessMeetingRespo
 
 
 @app.post("/api/generate-asset", response_model=GenerateAssetResponse)
-async def generate_asset(payload: GenerateAssetRequest) -> GenerateAssetResponse:
+async def generate_asset(request: Request, payload: GenerateAssetRequest) -> GenerateAssetResponse:
     """Generate a 16:9 mockup/moodboard image via Fal.ai Flux Schnell."""
     if not payload.prompt.strip():
         raise HTTPException(status_code=422, detail="prompt must not be empty.")
+    _check_rate_limit(request.client.host if request.client else "unknown", "fal", 3)
 
     def fallback() -> GenerateAssetResponse:
         return GenerateAssetResponse(**MOCK_GENERATE_ASSET_RESPONSE)
@@ -183,7 +265,8 @@ async def generate_asset(payload: GenerateAssetRequest) -> GenerateAssetResponse
 
 
 @app.post("/api/data-insights", response_model=DataInsightsResponse)
-async def data_insights(payload: DataInsightsRequest):
+async def data_insights(request: Request, payload: DataInsightsRequest):
+    _check_rate_limit(request.client.host if request.client else "unknown", "cala", 10)
     try:
         # Consultar Cala
         cala_data = await run_in_threadpool(
