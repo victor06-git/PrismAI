@@ -7,13 +7,13 @@ import { ArrowLeft, MessageSquare, Plus, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListeningBar } from "@/components/meeting/ListeningBar";
 
-type StatusTab = "open" | "pending" | "completed";
+type StatusTab = "tasks" | "moodboard" | "metrics";
 type ViewId = "meetings" | "tickets" | "sprint" | "insights";
 
 const statusTabs: { id: StatusTab; label: string }[] = [
-  { id: "open", label: "Open" },
-  { id: "pending", label: "Pending" },
-  { id: "completed", label: "Completed" },
+  { id: "tasks", label: "Tasks" },
+  { id: "moodboard", label: "Moodboard" },
+  { id: "metrics", label: "Metrics" },
 ];
 
 const inboxViews: { id: ViewId; label: string; color: string }[] = [
@@ -24,17 +24,17 @@ const inboxViews: { id: ViewId; label: string; color: string }[] = [
 ];
 
 const emptyCopy: Record<StatusTab, { title: string; body: string }> = {
-  open: {
-    title: "No conversations to manage",
-    body: "Nothing here yet. When a meeting, transcript, or ticket arrives it will appear in real time.",
+  tasks: {
+    title: "No tasks yet",
+    body: "Nothing here yet. When a meeting creates tickets or assignments they will appear in real time.",
   },
-  pending: {
-    title: "No pending conversations",
-    body: "Items waiting on a reply or review will show up in this tab.",
+  moodboard: {
+    title: "No moodboard concepts",
+    body: "Visual concepts from the conversation will land here as Prism generates them.",
   },
-  completed: {
-    title: "No completed conversations",
-    body: "Finished work from meetings and tickets will land here.",
+  metrics: {
+    title: "No metrics yet",
+    body: "KPI questions and data insights from the meeting will show up in this tab.",
   },
 };
 
@@ -44,13 +44,13 @@ export function InboxWorkspace() {
   const sessionActive = searchParams.get("start") === "1";
 
   const [view, setView] = useState<ViewId>("meetings");
-  const [status, setStatus] = useState<StatusTab>("open");
+  const [status, setStatus] = useState<StatusTab>("tasks");
   const [listening, setListening] = useState(true);
   const [showBar, setShowBar] = useState(sessionActive);
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-prisma-canvas animate-fade-in">
-      <aside className="flex w-[260px] shrink-0 flex-col border-r border-prisma-border bg-prisma-canvas">
+      <aside className="flex w-[260px] shrink-0 flex-col bg-prisma-canvas">
         <div className="px-3 pt-4 pb-2">
           <Link
             href="/"
@@ -99,50 +99,52 @@ export function InboxWorkspace() {
         </nav>
       </aside>
 
-      <main className="relative flex min-w-0 flex-1 flex-col bg-prisma-surface">
-        <div className="flex items-end gap-8 border-b border-prisma-border px-8">
-          {statusTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setStatus(tab.id)}
-              className={cn(
-                "-mb-px border-b-2 pb-3.5 pt-5 text-sm transition-colors",
-                status === tab.id
-                  ? "border-prisma-text font-medium text-prisma-text"
-                  : "border-transparent text-prisma-muted hover:text-prisma-text",
-              )}
-            >
-              {tab.label}{" "}
-              <span className="text-prisma-muted">0</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-prisma-border bg-prisma-canvas">
-            <MessageSquare className="h-6 w-6 text-prisma-muted stroke-[1.5]" />
+      <div className="flex min-w-0 flex-1 flex-col bg-prisma-canvas py-3 pr-3">
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[22px] border border-prisma-border bg-prisma-surface">
+          <div className="flex items-end gap-8 border-b border-prisma-border px-8">
+            {statusTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatus(tab.id)}
+                className={cn(
+                  "-mb-px border-b-2 pb-3.5 pt-5 text-sm transition-colors",
+                  status === tab.id
+                    ? "border-prisma-text font-medium text-prisma-text"
+                    : "border-transparent text-prisma-muted hover:text-prisma-text",
+                )}
+              >
+                {tab.label}{" "}
+                <span className="text-prisma-muted">0</span>
+              </button>
+            ))}
           </div>
-          <h2 className="text-lg font-medium tracking-tight text-prisma-text">
-            {emptyCopy[status].title}
-          </h2>
-          <p className="mt-2 max-w-sm text-center text-sm leading-relaxed text-prisma-muted">
-            {emptyCopy[status].body}
-          </p>
-        </div>
 
-        {showBar && (
-          <ListeningBar
-            listening={listening}
-            onTogglePause={() => setListening((prev) => !prev)}
-            onComplete={() => {
-              setShowBar(false);
-              setListening(false);
-              router.replace("/inbox");
-            }}
-          />
-        )}
-      </main>
+          <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-prisma-border bg-prisma-canvas">
+              <MessageSquare className="h-6 w-6 text-prisma-muted stroke-[1.5]" />
+            </div>
+            <h2 className="text-lg font-medium tracking-tight text-prisma-text">
+              {emptyCopy[status].title}
+            </h2>
+            <p className="mt-2 max-w-sm text-center text-sm leading-relaxed text-prisma-muted">
+              {emptyCopy[status].body}
+            </p>
+          </div>
+
+          {showBar && (
+            <ListeningBar
+              listening={listening}
+              onTogglePause={() => setListening((prev) => !prev)}
+              onComplete={() => {
+                setShowBar(false);
+                setListening(false);
+                router.replace("/inbox");
+              }}
+            />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
