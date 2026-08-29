@@ -4,9 +4,8 @@ services/fal_service.py
 Generates a visual asset (moodboard / mockup image) via Fal.ai Flux Schnell.
 """
 
-import fal_client
-
 from services.clients import FAL_KEY, FAL_MODEL, MissingAPIKeyError, UpstreamServiceError
+import fal_client
 
 
 def generate_visual_asset(prompt: str) -> str:

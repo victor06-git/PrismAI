@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const SPEECH_THRESHOLD = 0.035;
+const SPEAKER_PAUSE_MS = 2000;
 
 export interface MeetingResult {
   summary: string;
@@ -31,6 +33,8 @@ export function useRealtimeMeeting() {
   const contextRef = useRef<AudioContext | null>(null);
   const linesRef = useRef<string[]>([]);
   const partialsRef = useRef(new Map<string, string>());
+  const lastSpeechAtRef = useRef<number | null>(null);
+  const turnCommittedRef = useRef(false);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -44,6 +48,8 @@ export function useRealtimeMeeting() {
     pcRef.current = null;
     channelRef.current = null;
     contextRef.current = null;
+    lastSpeechAtRef.current = null;
+    turnCommittedRef.current = false;
     setAudioLevel(0);
   }, []);
 
@@ -58,6 +64,20 @@ export function useRealtimeMeeting() {
       analyser.getByteTimeDomainData(samples);
       const rms = Math.sqrt(samples.reduce((sum, value) => sum + ((value - 128) / 128) ** 2, 0) / samples.length);
       setAudioLevel(Math.min(1, rms * 4));
+      const now = performance.now();
+      if (rms >= SPEECH_THRESHOLD) {
+        lastSpeechAtRef.current = now;
+        turnCommittedRef.current = false;
+      } else if (
+        lastSpeechAtRef.current !== null &&
+        !turnCommittedRef.current &&
+        now - lastSpeechAtRef.current >= SPEAKER_PAUSE_MS &&
+        channelRef.current?.readyState === "open"
+      ) {
+        channelRef.current.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+        turnCommittedRef.current = true;
+        lastSpeechAtRef.current = null;
+      }
       frameRef.current = requestAnimationFrame(tick);
     };
     tick();
@@ -144,7 +164,7 @@ export function useRealtimeMeeting() {
     cleanup();
     if (!transcript) {
       setPhase("error");
-      setError("No se detectó voz. Habla unos segundos antes de finalizar.");
+      setError("No speech was detected. Speak for a few seconds before finishing.");
       return;
     }
     setPhase("processing");

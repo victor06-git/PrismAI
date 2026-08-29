@@ -11,9 +11,11 @@ import logging
 import os
 
 import httpx
+import truststore
 from dotenv import load_dotenv
 from openai import OpenAI
 
+truststore.inject_into_ssl()
 load_dotenv()  # Reads OPENAI_API_KEY / FAL_KEY / CALA_API_KEY from a local .env file, if present.
 
 logging.basicConfig(level=logging.INFO)
@@ -59,8 +61,13 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY or "sk-not-configured")
 # ---------------------------------------------------------------------------
 # Fal.ai
 # ---------------------------------------------------------------------------
-FAL_KEY = os.getenv("FAL_KEY")
+FAL_KEY = os.getenv("FAL_KEY") or os.getenv("FAL_API")
 FAL_MODEL = "fal-ai/flux/schnell"
+
+if FAL_KEY and not os.getenv("FAL_KEY"):
+    # fal_client only reads the FAL_KEY name. Keep compatibility with the
+    # FAL_API variable used by earlier versions of this project.
+    os.environ["FAL_KEY"] = FAL_KEY
 
 if not FAL_KEY:
     logger.warning(

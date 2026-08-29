@@ -269,11 +269,11 @@ async def data_insights(request: Request, payload: DataInsightsRequest):
         results = cala_data.get("results", [])[:8]
         entities = cala_data.get("entities", [])[:8]
 
-        # Asegurar que existe la reunión
+        # Ensure the meeting exists.
         if not get_meeting(payload.meetingId):
             save_meeting(payload.meetingId, payload.transcript)
 
-        # Guardar resultado de Cala en SQLite
+        # Save the Cala result in SQLite.
         save_context(
             meeting_id=payload.meetingId,
             context_type="cala_results",
