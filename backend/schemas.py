@@ -135,3 +135,40 @@ class DataInsightsRequest(BaseModel):
 class DataInsightsResponse(BaseModel):
     results: list[dict[str, Any]]
     entities: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# /api/process-text
+# ---------------------------------------------------------------------------
+
+
+class ProcessTextRequest(BaseModel):
+    text: str = Field(
+        min_length=1,
+        description="Raw meeting text to analyze — quick-testing fallback for the audio pipeline.",
+    )
+    meetingId: str | None = Field(default=None, description="Optional meeting id to persist this run under.")
+
+
+# ---------------------------------------------------------------------------
+# /api/audio/transcribe-and-process
+# ---------------------------------------------------------------------------
+
+
+class TranscriptSegment(BaseModel):
+    index: int
+    start: float = Field(description="Segment start time, in seconds from the start of the recording.")
+    end: float = Field(description="Segment end time, in seconds.")
+    text: str
+
+
+class AudioProcessResponse(BaseModel):
+    meetingId: str
+    transcript: str = Field(description="Full transcript, as actually transcribed by Whisper — never mock text.")
+    segments: list[TranscriptSegment] = Field(
+        description="Ordered, real timestamped transcript segments (chronological transcript log)."
+    )
+    summary: str
+    tickets: list[Ticket]
+    visualAssets: list[VisualAssetPrompt]
+    dataInsights: list[CalaDataInsight]

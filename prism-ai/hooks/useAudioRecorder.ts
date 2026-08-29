@@ -36,7 +36,8 @@ function pickMimeType(): string | undefined {
 }
 
 export function useAudioRecorder(
-  onRecordingComplete: (blob: Blob, mimeType: string) => void
+  onRecordingComplete: (blob: Blob, mimeType: string) => void,
+  onError?: (message: string) => void
 ): UseAudioRecorderResult {
   const [status, setStatus] = useState<RecorderStatus>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -52,9 +53,11 @@ export function useAudioRecorder(
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mimeTypeRef = useRef<string>("audio/webm");
   const onRecordingCompleteRef = useRef(onRecordingComplete);
+  const onErrorRef = useRef(onError);
   useEffect(() => {
     onRecordingCompleteRef.current = onRecordingComplete;
-  }, [onRecordingComplete]);
+    onErrorRef.current = onError;
+  }, [onRecordingComplete, onError]);
 
   const cleanup = useCallback(() => {
     if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current);
@@ -127,9 +130,11 @@ export function useAudioRecorder(
       setElapsedSeconds(0);
       timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not access the microphone.";
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Could not access the microphone.");
+      setError(message);
       cleanup();
+      onErrorRef.current?.(message);
     }
   }, [cleanup, monitorLevel]);
 

@@ -49,6 +49,8 @@ export interface CreativeConcept {
   tags: string[];
   gradient: string;
   icon: string;
+  /** Real Fal.ai-rendered image (16:9), once generated. Falls back to the gradient+icon card while absent. */
+  imageUrl?: string;
 }
 
 export interface KpiInsight {

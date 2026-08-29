@@ -18,15 +18,26 @@ export function CreativeCard({ concept, icon: Icon, animate }: CreativeCardProps
         animate && "animate-slide-in-up",
       )}
     >
-      <div
-        className={cn(
-          "h-28 bg-gradient-to-br flex items-center justify-center relative overflow-hidden",
-          concept.gradient,
-        )}
-      >
-        <Icon className="h-10 w-10 text-gray-400/60 group-hover:scale-110 transition-transform duration-300" />
-        <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent" />
-      </div>
+      {concept.imageUrl ? (
+        // Real Fal.ai render, 16:9. Plain <img> avoids configuring next.config.ts
+        // remote image domains for Fal's dynamic media host.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={concept.imageUrl}
+          alt={concept.title}
+          className="aspect-video w-full object-cover"
+        />
+      ) : (
+        <div
+          className={cn(
+            "aspect-video bg-gradient-to-br flex items-center justify-center relative overflow-hidden",
+            concept.gradient,
+          )}
+        >
+          <Icon className="h-10 w-10 text-gray-400/60 group-hover:scale-110 transition-transform duration-300" />
+          <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent" />
+        </div>
+      )}
       <div className="p-3">
         <h4 className="text-sm font-medium text-gray-900 mb-1">
           {concept.title}

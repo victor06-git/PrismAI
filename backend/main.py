@@ -52,6 +52,7 @@ from schemas import (
     GenerateAssetResponse,
     ProcessMeetingRequest,
     ProcessMeetingResponse,
+    ProcessTextRequest,
 )
 from services.cala_service import fetch_data_insights
 from services.clients import (
@@ -159,6 +160,34 @@ async def process_meeting(payload: ProcessMeetingRequest) -> ProcessMeetingRespo
         return _resolve_with_fallback("process-meeting", exc, 502, fallback)
     except Exception as exc:  # unexpected / programmer error — still never crash the demo
         return _resolve_with_fallback("process-meeting", exc, 500, fallback)
+
+
+@app.post("/api/process-text", response_model=ProcessMeetingResponse)
+async def process_text(payload: ProcessTextRequest) -> ProcessMeetingResponse:
+    """
+    Fallback / quick-testing endpoint: identical extraction to
+    /api/process-meeting, accepting raw text directly — handy for exercising
+    the OpenAI -> Fal.ai/Cala pipeline downstream without a microphone.
+    """
+    if not payload.text.strip():
+        raise HTTPException(status_code=422, detail="text must not be empty.")
+
+    def fallback() -> ProcessMeetingResponse:
+        return ProcessMeetingResponse(**MOCK_PROCESS_MEETING_RESPONSE)
+
+    try:
+        result = await run_in_threadpool(generate_meeting_outputs, payload.text)
+    except MissingAPIKeyError as exc:
+        return _resolve_with_fallback("process-text", exc, 500, fallback)
+    except UpstreamServiceError as exc:
+        return _resolve_with_fallback("process-text", exc, 502, fallback)
+    except Exception as exc:
+        return _resolve_with_fallback("process-text", exc, 500, fallback)
+
+    if payload.meetingId and not get_meeting(payload.meetingId):
+        save_meeting(payload.meetingId, payload.text)
+
+    return result
 
 
 @app.post("/api/generate-asset", response_model=GenerateAssetResponse)
