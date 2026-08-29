@@ -49,6 +49,7 @@ export interface CreativeConcept {
   tags: string[];
   gradient: string;
   icon: string;
+  imageUrl?: string;
 }
 
 export interface KpiInsight {

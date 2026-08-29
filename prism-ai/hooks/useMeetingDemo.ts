@@ -1,8 +1,8 @@
 "use client";
 
+import { generateVisual, getCalaInsights } from "@/lib/api";
 import { useCallback, useRef, useState } from "react";
 import {
-  demoCreativeConcepts,
   demoInsights,
   demoKpiInsights,
   demoTickets,
@@ -173,33 +173,123 @@ export function useMeetingDemo() {
       timersRef.current.push(timer);
     });
 
-    demoCreativeConcepts.forEach((concept, index) => {
-      const timer = setTimeout(() => {
+    const creativeTimer = setTimeout(async () => {
+      addToast(
+        "Visual concept generating",
+        "Fal is creating a concept from the live conversation",
+        "info",
+      );
+
+      try {
+        const liveContext = demoTranscript
+          .slice(0, 4)
+          .map((line) => `${line.speaker}: ${line.text}`)
+          .join("\n");
+
+        const prompt = `
+    Create a polished premium visual concept based on this product meeting.
+
+    Meeting context:
+    ${liveContext}
+
+    Create a realistic modern SaaS landing page or marketing concept.
+    Professional B2B startup aesthetic.
+    Clean typography, premium interface, modern visual hierarchy.
+    The design must clearly reflect the product, audience and goals discussed in the meeting.
+    16:9 composition.
+        `.trim();
+
+        const data = await generateVisual(prompt);
+
+        const concept: CreativeConcept = {
+          id: `fal-${Date.now()}`,
+          title: "AI-generated visual direction",
+          description: "Generated live from the meeting using Fal",
+          tags: ["Fal", "live", "AI-generated"],
+          gradient: "from-violet-50 via-purple-50 to-pink-50",
+          icon: "palette",
+          imageUrl: data.imageUrl,
+        };
+
         setState((prev) => ({
           ...prev,
           concepts: [...prev.concepts, concept],
         }));
 
-        if (index === 0) {
-          addToast("Visual concepts generating", "Moodboard from conversation", "info");
-        }
-      }, demoTimeline.creativeDelay * (index + 1));
-      timersRef.current.push(timer);
-    });
+        addToast(
+          "Visual concept ready",
+          "Fal generated a new creative direction",
+          "success",
+        );
+      } catch {
+        addToast(
+          "Visual generation failed",
+          "Fal could not generate the concept",
+          "error",
+        );
+      }
+    }, 9000);
 
-    demoKpiInsights.forEach((kpi, index) => {
-      const timer = setTimeout(() => {
-        setState((prev) => ({
-          ...prev,
-          kpiInsights: [...prev.kpiInsights, kpi],
+    timersRef.current.push(creativeTimer);
+
+const calaTimer = setTimeout(async () => {
+    addToast(
+      "Context enrichment started",
+      "Cala is enriching the meeting with structured data",
+      "info",
+    );
+
+    try {
+      const liveContext = demoTranscript
+        .slice(0, 4)
+        .map((line) => `${line.speaker}: ${line.text}`)
+        .join("\n");
+
+      const query = `
+  Based on this meeting context, find relevant companies, market examples or industry context.
+
+  Meeting:
+  ${liveContext}
+
+  Return useful company or market intelligence related to the product being discussed.
+      `.trim();
+
+      const data = await getCalaInsights(query);
+
+      const calaInsights: KpiInsight[] = data.results
+        .slice(0, 4)
+        .map((item, index) => ({
+          id: `cala-${Date.now()}-${index}`,
+          question: item.name ?? "Market insight",
+          metric: item.industry ?? "Industry context",
+          trend: "neutral",
+          value: item.headquarters ?? "Global",
+          context: item.industry ?? "Structured intelligence from Cala",
+          priority: index === 0 ? "high" : "medium",
         }));
 
-        if (index === 0) {
-          addToast("KPI insights detected", "Data questions from Cala", "info");
-        }
-      }, demoTimeline.kpiDelay * (index + 1));
-      timersRef.current.push(timer);
-    });
+      setState((prev) => ({
+        ...prev,
+        kpiInsights: calaInsights,
+      }));
+
+      addToast(
+        "Context enriched",
+        `${calaInsights.length} structured insights added by Cala`,
+        "success",
+      );
+    } catch {
+      addToast(
+        "Context enrichment failed",
+        "Cala could not retrieve structured context",
+        "error",
+      );
+    }
+  }, 7000);
+
+  timersRef.current.push(calaTimer);
+
+
   }, [addToast, clearAll]);
 
   const stopMeeting = useCallback(() => {
