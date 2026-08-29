@@ -1,0 +1,75 @@
+Actúa como un Senior Backend Engineer y Lead Architect. Estamos construyendo "PrismAI" para una hackathon de 12 horas: un copiloto en tiempo real que procesa reuniones y genera 3 salidas simultáneas:
+1. Backlog de Software (Scrum/Jira) con estimación de Story Points, tags y Criterios de Aceptación (OpenAI).
+2. Prompts para Moodboards y Creatividades visuales (Fal.ai Flux Schnell).
+3. Insights y métricas analíticas estilo Cala (Skip the Data).
+
+Quiero que inicialices y crees el backend completo usando FastAPI (Python).
+
+Realiza las siguientes tareas directamente en el código:
+
+1. Crea el archivo de dependencias requirements.txt con:
+   - fastapi
+   - uvicorn[standard]
+   - pydantic
+   - openai
+   - fal-client
+   - python-dotenv
+
+2. Crea la estructura de modelos en schemas.py usando Pydantic (BaseModel) con tipado estricto:
+   - Ticket (id, title, tag: Frontend/Backend/Design/Infra, priority: High/Medium/Low, storyPoints: int, acceptanceCriteria: list[str])
+   - VisualAssetPrompt (assetName, falPrompt)
+   - CalaDataInsight (id, question, metricTarget, value, trend, summary)
+   - ProcessMeetingRequest (transcript: str)
+   - ProcessMeetingResponse (summary: str, tickets: list[Ticket], visualAssets: list[VisualAssetPrompt], dataInsights: list[CalaDataInsight])
+   - GenerateAssetRequest (prompt: str)
+   - GenerateAssetResponse (imageUrl: str)
+
+3. Implementa main.py con la app FastAPI y CORS Middleware habilitado (para permitir peticiones desde el frontend en localhost:3000):
+   - Endpoint POST /api/process-meeting: Recibe el transcript y usa el cliente oficial de OpenAI con Structured Outputs (usando el modelo Pydantic ProcessMeetingResponse y gpt-4o-mini).
+   - Endpoint POST /api/generate-asset: Recibe el prompt y llama a fal_client.subscribe("fal-ai/flux/schnell", arguments={"prompt": prompt, "image_size": "landscape_16_9", "num_inference_steps": 4}) para devolver la URL de la imagen generada.
+   - Endpoint GET /api/health: Chequeo básico de salud del servicio.
+
+4. Crea un archivo mock_data.py con un objeto de respaldo estático (fallback) que contenga datos de prueba realistas para la demo por si falla la conexión.
+
+5. Crea un archivo .env.example con las variables OPENAI_API_KEY y FAL_KEY.
+
+Asegúrate de manejar errores con HTTPException(500), cargar variables de entorno con python-dotenv y proporcionar el comando exacto para arrancar el servidor uvicorn.
+
+---
+
+Actúa como un Senior Backend Engineer y Lead Architect. Estamos construyendo "PrismAI" para una hackathon de 12 horas: un copiloto en tiempo real que procesa reuniones y genera 3 salidas simultáneas:
+1. Backlog de Software (Scrum/Jira) con estimación de Story Points, tags y Criterios de Aceptación (OpenAI).
+2. Prompts para Moodboards y Creatividades visuales (Fal.ai Flux Schnell).
+3. Insights y métricas analíticas estilo Cala (Skip the Data).
+
+Quiero que inicialices y crees el backend completo usando FastAPI (Python).
+
+Realiza las siguientes tareas directamente en el código:
+
+1. Crea el archivo de dependencias requirements.txt con:
+   - fastapi
+   - uvicorn[standard]
+   - pydantic
+   - openai
+   - fal-client
+   - python-dotenv
+
+2. Crea la estructura de modelos en schemas.py usando Pydantic (BaseModel) con tipado estricto:
+   - Ticket (id, title, tag: Frontend/Backend/Design/Infra, priority: High/Medium/Low, storyPoints: int, acceptanceCriteria: list[str])
+   - VisualAssetPrompt (assetName, falPrompt)
+   - CalaDataInsight (id, question, metricTarget, value, trend, summary)
+   - ProcessMeetingRequest (transcript: str)
+   - ProcessMeetingResponse (summary: str, tickets: list[Ticket], visualAssets: list[VisualAssetPrompt], dataInsights: list[CalaDataInsight])
+   - GenerateAssetRequest (prompt: str)
+   - GenerateAssetResponse (imageUrl: str)
+
+3. Implementa main.py con la app FastAPI y CORS Middleware habilitado (para permitir peticiones desde el frontend en localhost:3000):
+   - Endpoint POST /api/process-meeting: Recibe el transcript y usa el cliente oficial de OpenAI con Structured Outputs (usando el modelo Pydantic ProcessMeetingResponse y gpt-4o-mini).
+   - Endpoint POST /api/generate-asset: Recibe el prompt y llama a fal_client.subscribe("fal-ai/flux/schnell", arguments={"prompt": prompt, "image_size": "landscape_16_9", "num_inference_steps": 4}) para devolver la URL de la imagen generada.
+   - Endpoint GET /api/health: Chequeo básico de salud del servicio.
+
+4. Crea un archivo mock_data.py con un objeto de respaldo estático (fallback) que contenga datos de prueba realistas para la demo por si falla la conexión.
+
+5. Crea un archivo .env.example con las variables OPENAI_API_KEY y FAL_KEY.
+
+Asegúrate de manejar errores con HTTPException(500), cargar variables de entorno con python-dotenv y proporcionar el comando exacto para arrancar el servidor uvicorn.

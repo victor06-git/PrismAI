@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M16E8KA4887Z2G7HKV2HYAVT",
+  "strategy": "manual-commit",
+  "branch": "backend_prism",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "backend/.env.example",
+    "backend/.gitignore",
+    "backend/main.py",
+    "backend/mock_data.py",
+    "backend/requirements.txt",
+    "backend/schemas.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 46490,
+    "cache_read_tokens": 595957,
+    "output_tokens": 16999,
+    "api_call_count": 18
+  }
+}
