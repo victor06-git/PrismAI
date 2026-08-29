@@ -1,0 +1,76 @@
+Act as a Senior QA Automation & Backend Engineer. Write a comprehensive test suite and an interactive verification script to validate our FastAPI user registration and QR-based authentication system.
+
+Context & Stack:
+- Framework: FastAPI (Python)
+- Testing: pytest, pytest-asyncio, httpx (TestClient/AsyncClient)
+- Target Flow: User Registration -> QR Session Creation -> QR Scan/Approval -> Desktop Polling & JWT Token Issue
+
+Requirements & Deliverables:
+
+1. Automated Pytest Suite (tests/test_auth_flow.py):
+   - Test User Registration (POST /api/auth/register):
+     * Successful registration with valid email and name.
+     * Rejection of duplicate email or invalid schema payloads.
+   - Test QR Session Lifecycle:
+     * Create QR session (POST /api/auth/qr-session/create): Verify session_id, nonce, and WAITING_SCAN status are returned.
+     * Poll waiting state (GET /api/auth/qr-session/poll?sessionId=...): Confirm it returns pending status while waiting.
+     * Approve session by mobile scan (POST /api/auth/qr-session/scan): Simulate scanning with a valid user ID, asserting status updates to APPROVED.
+     * Poll approved state: Verify polling returns the generated JWT access token and user session data.
+   - Test Edge Cases & Security:
+     * Expired sessions (simulate timestamp expiration).
+     * Replay attack prevention (attempting to scan an already approved or expired session).
+
+2. Interactive Manual Verification Script (scripts/verify_auth.py):
+   - A standalone Python CLI script using 'httpx' or 'requests' that runs against the running local server (http://localhost:8000).
+   - Steps to execute sequentially:
+     1. Registers a test user (e.g., test_hackathon@prismai.dev).
+     2. Generates a new QR login session and prints the session ID/QR payload.
+     3. Simulates the mobile device scan to approve the session.
+     4. Polls the session and prints the final JWT access token.
+   - Print clear green/red status logs in the terminal for each step to confirm that all endpoints are fully operational.
+
+Provide clean, ready-to-run Python code with clear execution commands (e.g., pytest and python scripts/verify_auth.py).
+
+---
+
+Can you create an script to test in real life not like a test the endpoints of register and auth with a mini frontend. Act as a Senior Full-Stack AI Engineer. Implement the real-time speech-to-workflow pipeline for our PrismAI MVP.
+
+Flow Architecture:
+1. Client-Side Audio Recording: Stream or record microphone audio chunks from the Next.js frontend.
+2. Transcription & Streaming (FastAPI / OpenAI Whisper API): Send audio chunks to FastAPI to transcribe into text in real-time or near real-time.
+3. Multi-Agent Orchestration (OpenAI Structured Outputs):
+   - Analyze the transcript continuously or upon meeting chunk completion.
+   - Synthesize and extract 3 targeted payloads:
+     a) Jira / Agile Backlog Tickets (OpenAI GPT-4o-mini / GPT-4o with Pydantic schema: title, tag, priority, storyPoints, acceptanceCriteria).
+     b) UI/UX Visual Prompts for Fal.ai (Flux Schnell formatted landscape 16:9 prompts).
+     c) Business / Data Questions for Cala API (Metrics, KPIs, tracking requirements).
+4. Concurrent Execution:
+   - Call Fal.ai (`fal_client.subscribe("fal-ai/flux/schnell", ...)`) in parallel with the generated visual prompts to generate mockup images.
+   - Call the Cala API client to enrich analytics/metrics based on the extracted business context.
+5. Real-Time Frontend Updates:
+   - Return structured results or stream them via Server-Sent Events (SSE) / WebSockets to dynamically populate the dashboard tabs (Jira tickets, Fal images, and Cala data cards).
+
+Requirements & Deliverables:
+
+1. Backend (FastAPI):
+   - Endpoint `POST /api/audio/transcribe-and-orchestrate`: Accepts `multipart/form-data` audio files (e.g., webm/mp3), transcribes with `openai.audio.transcriptions.create(model="whisper-1")`, and runs the structured JSON orchestration.
+   - Async parallel task handling using `asyncio.gather` for Fal.ai and Cala API calls to keep latency minimal.
+   - Return the consolidated response matching our `ProcessMeetingResponse` schema.
+
+2. Frontend (Next.js & React Hook):
+   - Implement an audio recorder hook (`useAudioRecorder.ts`) using the browser MediaRecorder API with start/stop recording, audio wave visualization state, and automatic chunk upload.
+   - Live Dashboard Component updating:
+     * Jira Kanban/List view with Story Points and tags.
+     * Fal.ai image preview gallery (16:9 aspect ratio).
+     * Cala Data Insights widget.
+   - Loading skeletons and animated state transitions when new tickets/assets stream in.
+
+3. Error Handling & Fallbacks:
+   - Graceful fallback to mock data if any third-party API exceeds rate limits or fails during live demos.
+   - Clean logging across all pipeline stages.
+
+Provide production-ready, copy-pasteable TypeScript and Python code with all dependencies clearly specified.
+
+---
+
+How can I execute it?

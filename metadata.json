@@ -1,0 +1,60 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M16RKTV6W3T0DJJZP82QPEY2",
+  "strategy": "manual-commit",
+  "branch": "backend_prism",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "backend/.env.example",
+    "backend/.gitignore",
+    "backend/audio/__init__.py",
+    "backend/audio/router.py",
+    "backend/auth/__init__.py",
+    "backend/auth/router.py",
+    "backend/auth/schemas.py",
+    "backend/auth/security.py",
+    "backend/auth/store.py",
+    "backend/main.py",
+    "backend/pytest.ini",
+    "backend/requirements.txt",
+    "backend/schemas.py",
+    "backend/scripts/verify_auth.py",
+    "backend/services/whisper_service.py",
+    "backend/tests/__init__.py",
+    "backend/tests/conftest.py",
+    "backend/tests/test_auth_flow.py",
+    "prism-ai/.env.local.example",
+    "prism-ai/.gitignore",
+    "prism-ai/app/auth-test/page.tsx",
+    "prism-ai/app/components/AudioRecorderPanel.tsx",
+    "prism-ai/app/components/BacklogPanel.tsx",
+    "prism-ai/app/components/InsightsPanel.tsx",
+    "prism-ai/app/components/MoodboardPanel.tsx",
+    "prism-ai/app/components/Skeleton.tsx",
+    "prism-ai/app/components/TranscriptForm.tsx",
+    "prism-ai/app/globals.css",
+    "prism-ai/app/hooks/useAudioRecorder.ts",
+    "prism-ai/app/layout.tsx",
+    "prism-ai/app/lib/api.ts",
+    "prism-ai/app/lib/sample-transcript.ts",
+    "prism-ai/app/lib/sse.ts",
+    "prism-ai/app/lib/types.ts",
+    "prism-ai/app/page.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 318,
+    "cache_creation_tokens": 251453,
+    "cache_read_tokens": 36422009,
+    "output_tokens": 168081,
+    "api_call_count": 159
+  }
+}

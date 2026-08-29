@@ -1,0 +1,139 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M16RKTV6W3T0DJJZP82QPEY2",
+  "session_id": "d1d14398-e98f-40ad-b7cc-1d70f546559b",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-29T12:41:22.61932352Z",
+  "branch": "backend_prism",
+  "checkpoints_count": 4,
+  "save_step_count": 4,
+  "files_touched": [
+    "backend/.env.example",
+    "backend/.gitignore",
+    "backend/audio/__init__.py",
+    "backend/audio/router.py",
+    "backend/auth/__init__.py",
+    "backend/auth/router.py",
+    "backend/auth/schemas.py",
+    "backend/auth/security.py",
+    "backend/auth/store.py",
+    "backend/main.py",
+    "backend/pytest.ini",
+    "backend/requirements.txt",
+    "backend/schemas.py",
+    "backend/scripts/verify_auth.py",
+    "backend/services/whisper_service.py",
+    "backend/tests/__init__.py",
+    "backend/tests/conftest.py",
+    "backend/tests/test_auth_flow.py",
+    "prism-ai/.env.local.example",
+    "prism-ai/.gitignore",
+    "prism-ai/app/auth-test/page.tsx",
+    "prism-ai/app/components/AudioRecorderPanel.tsx",
+    "prism-ai/app/components/BacklogPanel.tsx",
+    "prism-ai/app/components/InsightsPanel.tsx",
+    "prism-ai/app/components/MoodboardPanel.tsx",
+    "prism-ai/app/components/Skeleton.tsx",
+    "prism-ai/app/components/TranscriptForm.tsx",
+    "prism-ai/app/globals.css",
+    "prism-ai/app/hooks/useAudioRecorder.ts",
+    "prism-ai/app/layout.tsx",
+    "prism-ai/app/lib/api.ts",
+    "prism-ai/app/lib/sample-transcript.ts",
+    "prism-ai/app/lib/sse.ts",
+    "prism-ai/app/lib/types.ts",
+    "prism-ai/app/page.tsx"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "da090128279c",
+  "checkpoint_transcript_start": 231,
+  "transcript_lines_at_start": 231,
+  "compact_transcript_start": 60,
+  "token_usage": {
+    "input_tokens": 318,
+    "cache_creation_tokens": 251453,
+    "cache_read_tokens": 36422009,
+    "output_tokens": 168081,
+    "api_call_count": 159
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_017fmRry4ZD6AhpikTUEdWH7",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "run"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "b54033c0e70a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 331,
+        "end": 332,
+        "entry_ids": [
+          "287c1bf6-7825-4b7b-bdd0-52c035842161"
+        ],
+        "tool_use_id": "toolu_017fmRry4ZD6AhpikTUEdWH7"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_017fmRry4ZD6AhpikTUEdWH7"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: run",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-29T12:41:21.298856464Z",
+    "agent_lines": 2418,
+    "agent_removed": 64,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2418,
+    "total_lines_changed": 2482,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 521,
+      "agent_lines_removed": 63
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1328,
+      "agent_lines_removed": 65
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2418,
+      "agent_lines_removed": 64
+    }
+  ]
+}
