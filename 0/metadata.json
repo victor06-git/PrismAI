@@ -1,0 +1,69 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M16J9PGYKFEH0Y133YDZES8M",
+  "session_id": "d1d14398-e98f-40ad-b7cc-1d70f546559b",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-29T10:50:58.4642209Z",
+  "branch": "backend_prism",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "backend/.env.example",
+    "backend/main.py",
+    "backend/mock_data.py",
+    "backend/requirements.txt",
+    "backend/schemas.py",
+    "backend/services/__init__.py",
+    "backend/services/cala_service.py",
+    "backend/services/clients.py",
+    "backend/services/fal_service.py",
+    "backend/services/openai_service.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "b54033c0e70a",
+  "checkpoint_transcript_start": 83,
+  "transcript_lines_at_start": 83,
+  "compact_transcript_start": 20,
+  "token_usage": {
+    "input_tokens": 72,
+    "cache_creation_tokens": 60613,
+    "cache_read_tokens": 3128239,
+    "output_tokens": 45057,
+    "api_call_count": 36
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-29T10:50:58.187595571Z",
+    "agent_lines": 430,
+    "agent_removed": 154,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 430,
+    "total_lines_changed": 584,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 1,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".gitignore": 1
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 431,
+      "agent_lines_removed": 154
+    }
+  ]
+}

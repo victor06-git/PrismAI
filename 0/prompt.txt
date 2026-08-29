@@ -1,0 +1,24 @@
+Act as a Senior Backend Engineer. Integrate the API credentials for OpenAI, Fal.ai, and Cala into our FastAPI backend for PrismAI.
+
+Requirements & Deliverables:
+
+1. Environment & Client Setup:
+   - Load environment variables from .env using python-dotenv:
+     * OPENAI_API_KEY
+     * FAL_KEY
+     * CALA_API_KEY
+   - Initialize and export the official OpenAI client and fal_client in a dedicated service or module (e.g., app/services/clients.py or inside main.py).
+   - Create a clean helper function for Cala API calls authenticated with CALA_API_KEY.
+
+2. API Routes Updates:
+   - POST /api/process-meeting: Uses the initialized OpenAI client (gpt-4o-mini or gpt-4o) with Structured Outputs via Pydantic to parse meeting transcripts into tickets, visual prompts, and data insights.
+   - POST /api/generate-asset: Uses fal_client.subscribe("fal-ai/flux/schnell", ...) to return generated 16:9 mockup image URLs.
+   - POST /api/data-insights: Uses CALA_API_KEY to query or enrich analytical metrics based on the conversation context.
+
+3. Robust Error Handling:
+   - Wrap all external API requests in try/except blocks.
+   - If an API key is missing or an upstream call fails, raise an appropriate HTTPException (status 500/502) with clear error logging.
+   - Provide fallback to mock responses if external requests fail during demo tests.
+
+4. Dependencies:
+   - Update requirements.txt to ensure all required libraries are listed (openai, fal-client, requests/httpx, python-dotenv, fastapi, uvicorn, pydantic).
